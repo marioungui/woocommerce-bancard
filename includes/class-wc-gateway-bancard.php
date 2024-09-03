@@ -17,6 +17,15 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
         $this->public_key = $this->get_option('public_key');
         $this->private_key = $this->get_option('private_key');
         $this->environment = $this->get_option('environment');
+        $this->supports = array (
+            'refunds',
+            'subscriptions',
+            'subscriptions_recurring',
+            'subscription_cancellation',
+            'subscription_suspension',
+            'subscription_reactivation',
+            'tokenization'
+        );
 
         add_action('woocommerce_receipt_' . $this->id, array($this, 'receipt_page'));
 
@@ -411,19 +420,32 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
      */
     public function process_refund($order_id, $amount = null, $reason = '') {
         $order = wc_get_order($order_id);
-        $shop_process_id = $order->get_id(); // Asegúrate de que esto sea correcto.
+        $shop_process_id = $order->get_id();
+
+        // Validate amount, it should be exactly the same amount of the order and if not return an error
+        if ($amount != $order->get_total()) {
+            return new WP_Error('bancard_refund_error', 'El monto del reembolso debe ser exactamente el mismo que el monto de la orden.');
+        }
+
+        // Check if the order date is today and if not, return an error
+        $order_date = $order->get_date_created();
+        $today = new DateTime('now');
+        $today->setTime(0, 0, 0);
+        if ($order_date->format('Y-m-d') != $today->format('Y-m-d')) {
+            return new WP_Error('bancard_refund_error', 'El reembolso vía API de Bancard solo se puede realizar el mismo día de la orden. Para reversar este pedido hazlo por el canal oficial:
+            Portal de comercios -> soporte -> anulaciones');
+        }
     
-        // Asegúrate de que el endpoint y el token sean correctos.
         $endpoint = $this->environment == 'production' ? 'https://vpos.infonet.com.py' : 'https://vpos.infonet.com.py:8888';
         $url = $endpoint . '/vpos/api/0.3/single_buy/rollback';
     
-        $token = md5($this->private_key . $shop_process_id . "rollback" . "0.00"); // Asegúrate de que esto sea correcto.
+        $token = md5($this->private_key . $shop_process_id . "rollback" . "0.00");
     
         $data = array(
             'public_key' => $this->public_key,
             'operation' => array(
-                'shop_process_id' => $shop_process_id,
                 'token' => $token,
+                'shop_process_id' => $shop_process_id,
             )
         );
     
@@ -440,10 +462,11 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
         $body = json_decode(wp_remote_retrieve_body($response), true);
     
         if ($body['status'] == 'success') {
-            $order->add_order_note('Refund processed via Bancard.');
+            $order->update_status('refunded', 'Reembolso procesado correctamente vía Bancard.');
+            $order->save();
             return true;
         } else {
-            return new WP_Error('bancard_refund_error', 'Refund failed: ' . $body['message']);
+            return new WP_Error('bancard_refund_error', 'Reembolso no procesado: ' . $body['messages'][0]['dsc']);
         }
     }
     
@@ -486,18 +509,21 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
      *
      * @param int $order_id El ID del pedido a confirmar.
      *
-     * @return bool|WP_Error True si la confirmaci n fue exitosa, WP_Error en caso de error.
+     * @return bool|WP_Error True si la confirmación fue exitosa, WP_Error en caso de error.
      */
     public function confirm_transaction($order_id) {
         $order = wc_get_order($order_id);
         $shop_process_id = $order->get_id();
     
         $endpoint = $this->environment == 'production' ? 'https://vpos.infonet.com.py' : 'https://vpos.infonet.com.py:8888';
-        $url = $endpoint . '/vpos/api/0.3/check_transaction';
+        $url = $endpoint . '/vpos/api/0.3/single_buy/confirmations';
+
+        $token = md5($this->private_key . $shop_process_id . "get_confirmation");
     
         $data = array(
             'public_key' => $this->public_key,
             'operation' => array(
+                'token' => $token,
                 'shop_process_id' => $shop_process_id,
             )
         );
@@ -514,12 +540,19 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
     
         $body = json_decode(wp_remote_retrieve_body($response), true);
     
-        if ($body['status'] == 'success' && $body['operation']['status'] == 'completed') {
-            $order->payment_complete();
-            $order->add_order_note('Transaction confirmed manually via Bancard.');
+        if ($body['status'] == 'success' && $body['confirmation']['response'] == 'S') {
+            if ($order->get_status() != 'processing') {
+                $order->payment_complete();
+            }
+            $order->add_order_note('Transacción Confirmada por Bancard el ' . current_datetime()->format('Y-m-d H:i:s'). '.');
             return true;
-        } else {
-            return new WP_Error('bancard_confirmation_error', 'Transaction confirmation failed: ' . $body['message']);
+        }
+        else if ($body['status'] == 'error' && $body['messages'][0]['key'] == 'PaymentNotFoundError') {
+            $order->update_status('failed', 'Transaction confirmation failed: ' . $body['messages'][0]['dsc']);
+            return new WP_Error('bancard_confirmation_error', 'Transaction confirmation failed: ' . $body['messages'][0]['dsc']);
+        }
+        else{
+            return new WP_Error('bancard_confirmation_error', 'Transaction confirmation failed: ' . $body['messages'][0]['dsc']);
         }
     }
     

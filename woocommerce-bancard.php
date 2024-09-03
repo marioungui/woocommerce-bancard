@@ -25,6 +25,7 @@ add_action('admin_enqueue_scripts', 'bancard_admin_scripts');
 // Functions
 function add_bancard_gateway($gateways) {
     $gateways[] = 'WC_Gateway_Bancard';
+    $gateways[] = 'WC_Gateway_Bancard_Zimple';
     return $gateways;
 }
 

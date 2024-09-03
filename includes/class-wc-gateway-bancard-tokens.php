@@ -121,6 +121,17 @@ class WC_Gateway_Bancard_Tokens extends WC_Gateway_Bancard {
         return $cards;
     }
 
+    /**
+     * Muestra la lista de tarjetas guardadas del usuario.
+     *
+     * Consulta la API de Bancard para obtener la lista de tarjetas
+     * asociadas al usuario actual y las muestra en una tabla con
+     * información detallada. Si una tarjeta ya tiene un token
+     * asociado en WooCommerce, no se crea uno nuevo.
+     *
+     * @since 1.0.0
+     * @return void
+     */
     public function list_payment_methods() {
         // Obtener el ID del cliente
         $user_id = get_current_user_id();
@@ -169,8 +180,39 @@ class WC_Gateway_Bancard_Tokens extends WC_Gateway_Bancard {
             echo '<th>Tipo de Tarjeta</th>';
             echo '<th>Acciones</th>';
             echo '</tr>';
-        
+    
             foreach ($body['cards'] as $card) {
+                // Desglosar la fecha de expiración
+                list($month, $year) = explode('/', $card['expiration_date']);
+                $year = '20' . $year;  // Añadir el prefijo "20" al año
+    
+                // Buscar si ya existe un token para esta tarjeta
+                $token_exists = false;
+                $tokens = WC_Payment_Tokens::get_customer_tokens($user_id);
+    
+                foreach ($tokens as $token) {
+                    if ($token->get_last4() == substr($card['card_masked_number'], -4) && 
+                        $token->get_expiry_month() == $month && 
+                        $token->get_expiry_year() == $year && 
+                        $token->get_card_type() == strtolower($card['card_brand'])) {
+                        $token_exists = true;
+                        break;
+                    }
+                }
+    
+                // Si no existe un token, crear uno nuevo
+                if (!$token_exists) {
+                    $new_token = new WC_Payment_Token_CC();
+                    $new_token->set_token($card['alias_token']); // Asocia el token de la tarjeta con WooCommerce
+                    $new_token->set_gateway_id('bancard'); // Reemplaza con el ID de tu gateway si es diferente
+                    $new_token->set_last4(substr($card['card_masked_number'], -4));
+                    $new_token->set_expiry_month($month);
+                    $new_token->set_expiry_year($year);
+                    $new_token->set_card_type(strtolower($card['card_brand']));
+                    $new_token->set_user_id($user_id);
+                    $new_token->save();
+                }
+    
                 // Generar la URL para eliminar la tarjeta
                 $delete_url = add_query_arg(array(
                     'action' => 'delete_card',
@@ -178,7 +220,7 @@ class WC_Gateway_Bancard_Tokens extends WC_Gateway_Bancard {
                     'user_id' => $user_id,
                     'card_token' => $card['alias_token'],
                 ), wc_get_endpoint_url('delete-payment-method'));
-        
+    
                 echo '<tr>';
                 echo '<td>' . esc_html($card['card_masked_number']) . '</td>';
                 echo '<td>' . esc_html($card['expiration_date']) . '</td>';
@@ -189,13 +231,12 @@ class WC_Gateway_Bancard_Tokens extends WC_Gateway_Bancard {
                 echo '</td>';
                 echo '</tr>';
             }
-        
+    
             echo '</table>';
         } else {
             echo '<p>No tienes métodos de pago guardados.</p>';
         }
-             
-    }
+    }    
     
 
     public function delete_payment_method($card_token) {

@@ -12,6 +12,7 @@ $environment = $bancard->environment;
 $endpoint = $environment == 'production' ? 'https://vpos.infonet.com.py' : 'https://vpos.infonet.com.py:8888';
 
 $process_id = isset($_GET['process_id']) ? sanitize_text_field($_GET['process_id']) : '';
+$zimple = isset($_GET['zimple']) ? sanitize_text_field($_GET['zimple']) : false;
 
 if ($process_id) {
     ?>
@@ -21,7 +22,7 @@ if ($process_id) {
     </div>
 
     <script>
-        Bancard.Checkout.createForm('bancard-payment-form', '<?= $process_id; ?>'); 
+        Bancard.<?= $zimple ? 'Zimple' : 'Checkout'?>.createForm('bancard-payment-form', '<?= $process_id; ?>'); 
     </script>
     <?php
 } else {
