@@ -19,10 +19,10 @@ jobs:
       - name: Crear carpeta del proyecto
         run: mkdir ${{ env.PROJECT_NAME }}
 
-      - name: Mover todos los archivos a la carpeta del proyecto
+      - name: Copiar todos los archivos a la carpeta del proyecto
         run: |
           shopt -s extglob
-          mv !(nombre_de_carpeta) ${{ env.PROJECT_NAME }}/
+          cp -r !( ${env.PROJECT_NAME} ) ${{ env.PROJECT_NAME }}/
 
       - name: Crear un archivo ZIP
         run: zip -r ${{ env.PROJECT_NAME }}.zip ${{ env.PROJECT_NAME }}
