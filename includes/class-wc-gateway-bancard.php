@@ -434,7 +434,7 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
         $endpoint = $this->environment == 'production' ? 'https://vpos.infonet.com.py' : 'https://vpos.infonet.com.py:8888';
         $url = $endpoint . '/vpos/api/0.3/single_buy/rollback';
     
-        $token = md5($this->private_key . $shop_process_id . "rollback" . "0.00");
+        $token = md5($this->private_key . $shop_process_id . "rollback0.00");
     
         $data = array(
             'public_key' => $this->public_key,

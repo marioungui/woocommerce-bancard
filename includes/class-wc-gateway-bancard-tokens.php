@@ -450,10 +450,11 @@ class WC_Gateway_Bancard_Tokens extends WC_Payment_Gateway {
         if ($body['status'] == 'success') {
             // Eliminar el token de los métodos de pago del cliente
             $tokens = get_user_meta($user_id, '_bancard_payment_tokens', true);
-            if (($key = array_search($token_id, array_column($tokens, 'token'))) !== false) {
-                unset($tokens[$key]);
+            $token_index = array_search($card_token, array_column($tokens, 'token'));
+            if ($token_index !== false) {
+                unset($tokens[$token_index]);
                 update_user_meta($user_id, '_bancard_payment_tokens', array_values($tokens));
-                wc_add_notice('Método de pago eliminado exitosamente.', 'success');
+                wc_add_notice(__('Payment method deleted successfully.', 'woocommerce-bancard'), 'success');
                 wp_safe_redirect(wc_get_page_permalink('myaccount'));
                 return;
             }
