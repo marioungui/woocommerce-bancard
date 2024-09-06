@@ -1,0 +1,35 @@
+name: Crear Release Automáticamente
+
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  crear_release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v3
+
+      - name: Obtener el nombre del proyecto
+        run: echo "PROJECT_NAME=$(basename $GITHUB_REPOSITORY)" >> $GITHUB_ENV
+
+      - name: Crear carpeta del proyecto
+        run: mkdir ${{ env.PROJECT_NAME }}
+
+      - name: Mover todos los archivos a la carpeta del proyecto
+        run: |
+          shopt -s extglob
+          mv !(nombre_de_carpeta) ${{ env.PROJECT_NAME }}/
+
+      - name: Crear un archivo ZIP
+        run: zip -r ${{ env.PROJECT_NAME }}.zip ${{ env.PROJECT_NAME }}
+
+      - name: Crear Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ${{ env.PROJECT_NAME }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
