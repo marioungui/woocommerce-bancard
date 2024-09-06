@@ -128,25 +128,25 @@ add_action('woocommerce_order_action_bancard_confirm_transaction', 'process_banc
 add_action('admin_init', function () {
     $plugin_data = get_plugin_data(__FILE__);
     $plugin_version = $plugin_data['Version'];
-    $repo_url = 'https://api.github.com/repos/marioungui/woocommerce-bancard/tags';
-    $transient_name = 'woocommerce_bancard_latest_tag';
+    $repo_url = 'https://api.github.com/repos/marioungui/woocommerce-bancard/releases/latest';
+    $transient_name = 'woocommerce_bancard_latest_release';
     $transient = get_transient($transient_name);
     if ($transient) {
-        $latest_tag = $transient;
+        $latest_release = $transient;
     } else {
         $response = wp_remote_get($repo_url);
         if (is_wp_error($response)) {
             return;
         }
-        $tags = json_decode(wp_remote_retrieve_body($response));
-        $latest_tag = $tags[0]->name;
-        // Cache the latest tag for 24h
-        set_transient($transient_name, $latest_tag, DAY_IN_SECONDS);
+        $latest_release = json_decode(wp_remote_retrieve_body($response));
+        // Cache the latest release for 24h
+        set_transient($transient_name, $latest_release, DAY_IN_SECONDS);
     }
-    if (version_compare($latest_tag, $plugin_version, '>')) {
-        add_action('admin_notices', function () use ($latest_tag) {
-            $message = 'Una nueva actualización del plugin WooCommerce Bancard esta disponible. <a href="https://github.com/marioungui/woocommerce-bancard/releases/tag/' . $latest_tag . '">Descargalo aquí.</a>';
+    if (version_compare($latest_release->tag_name, $plugin_version, '>')) {
+        add_action('admin_notices', function () use ($latest_release) {
+            $message = 'Una nueva actualización del plugin WooCommerce Bancard esta disponible. <a href="' . $latest_release->zipball_url . '">Descargalo aquí.</a>';
             echo '<div class="notice notice-info"><p>' . $message . '</p></div>';
         });
     }
 });
+
