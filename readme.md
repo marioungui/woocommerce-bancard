@@ -1,24 +1,29 @@
 # Gateway de Bancard para WooCommerce
+[![CodeFactor](https://www.codefactor.io/repository/github/marioungui/woocommerce-bancard/badge/main)](https://www.codefactor.io/repository/github/marioungui/woocommerce-bancard/overview/main)
 
 Este es un plugin para WooCommerce que integra la pasarela de pagos Bancard para permitir a los usuarios realizar pagos con tarjeta de crédito y débito a través de la plataforma Bancard.
 
 ## Funcionalidades
 
 ### 1. Procesamiento de Pagos
+
 - **Single Buy**: El plugin permite a los usuarios realizar compras únicas redirigiendo a la página de pago de Bancard.
 - **Pagos Recurrentes**: Soporte para pagos de suscripciones mediante el uso de tokens.
 - **Gestión de Tokens**: Las tarjetas de los usuarios se pueden registrar y almacenar de manera segura como tokens en WooCommerce, permitiendo pagos rápidos en futuras transacciones.
   
 ### 2. Gestión de Tarjetas Guardadas
+
 - **Listado de Tarjetas**: Los usuarios pueden ver una lista de sus tarjetas guardadas en la sección "Mi cuenta".
 - **Eliminación de Tarjetas**: Los usuarios pueden eliminar tarjetas guardadas con la confirmación previa de la acción.
 - **Tokenización**: Implementación del proceso de tokenización de tarjetas para realizar pagos de manera segura.
 
 ### 3. Interacción con la API de Bancard
+
 - **Registro de Tarjetas**: El plugin permite a los usuarios registrar nuevas tarjetas utilizando la API de Bancard.
 - **Consulta de Tarjetas Catastradas**: Consulta de tarjetas guardadas para un usuario mediante la API de Bancard.
 
 ### 4. Integración con WooCommerce
+
 - **Compatibilidad Total**: El plugin se integra completamente con el sistema de tokens de WooCommerce, permitiendo que las tarjetas guardadas se gestionen de la misma manera que con otros métodos de pago.
 
 ## Estructura del Código
@@ -72,6 +77,7 @@ Esta clase extiende las funcionalidades de `WC_Gateway_Bancard` para manejar la 
    `git clone https://github.com/tu-usuario/woocommerce-bancard.git`
 2. Activa el plugin desde el panel de administración de WordPress.
 3. Configura el plugin desde **WooCommerce > Ajustes > Pagos > Bancard**.
+4. Confirmá la URL de la dirección de pagos en el portal de comercios con `https://{tu-dominio}/wc-api/wc_gateway_bancard`
 
 ## Contribuir
 
