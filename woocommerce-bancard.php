@@ -1,15 +1,17 @@
 <?php
 /*
-Plugin Name: WooCommerce Bancard Gateway
+Plugin Name: Bancard para WooCommerce
 Plugin URI: https://emedos.com.py/woocommerce-bancard/
 Description: Pasarela de pagos Bancard para WooCommerce.
-Version: 0.2.4
+Version: 0.2.5
 Author: M2 Design
 Author URI: https://emedos.com.py/
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 Text Domain: woocommerce-bancard
 */
+
+define('WC_BANCARD_VERSION', '0.2.5');
 
 if (!defined('ABSPATH')) {
     exit; // Exit if accessed directly.
@@ -18,9 +20,7 @@ if (!defined('ABSPATH')) {
 // Hooks
 add_filter('woocommerce_payment_gateways', 'add_bancard_gateway');
 add_action('plugins_loaded', 'init_bancard_gateway', 11);
-add_action('woocommerce_account_payment-methods_endpoint', 'bancard_payment_methods');
 add_action('wp_enqueue_scripts', 'bancard_enqueue_scripts');
-add_action('admin_enqueue_scripts', 'bancard_admin_scripts');
 
 // Functions
 function add_bancard_gateway($gateways) {
@@ -50,17 +50,6 @@ function init_bancard_gateway() {
     include_once 'includes/class-wc-gateway-bancard-zimple.php';
 }
 
-/**
- * Load the payment methods template.
- *
- * This function is hooked into `woocommerce_account_payment-methods_endpoint` and
- * is responsible for loading the payment methods template.
- *
- * @return void
- */
-function bancard_payment_methods() {
-    include_once 'templates/bancard-payment-methods.php';
-}
 
 /**
  * Enqueue scripts and styles for the frontend.
@@ -69,21 +58,12 @@ function bancard_payment_methods() {
  * loading the necessary styles and scripts for the frontend.
  */
 function bancard_enqueue_scripts() {
-    wp_enqueue_style('bancard-style', plugins_url('/assets/css/style.css', __FILE__));
-    wp_enqueue_script('bancard-script', plugins_url('/assets/js/script.js', __FILE__), array('jquery'), null, true);
+    if (is_checkout() || is_account_page()) {
+        wp_enqueue_style('bancard-style', plugins_url('/assets/css/style.css', __FILE__), array(), WC_BANCARD_VERSION);
+        wp_enqueue_script('bancard-script', plugins_url('/assets/js/script.js', __FILE__), array('jquery'), WC_BANCARD_VERSION, true);
+    }
 }
 
-/**
- * Enqueue scripts and styles for the admin area.
- *
- * This function is hooked into `admin_enqueue_scripts` and is responsible for
- * loading the necessary styles and scripts for the admin area.
- */
-function bancard_admin_scripts() {
-    wp_enqueue_script('bancard-admin-script', plugins_url('/assets/js/admin-script.js', __FILE__), array('jquery'), null, true);
-}
-
-register_activation_hook(__FILE__, 'create_bancard_payment_page');
 
 /**
  * Verifica si la página de pago con Bancard existe y la crea si no es así.
@@ -109,5 +89,5 @@ function create_bancard_payment_page() {
         wp_insert_post($page_data);
     }
 }
-
+register_activation_hook(__FILE__, 'create_bancard_payment_page');
 ?>

@@ -29,7 +29,7 @@ class WC_Gateway_Bancard_Tokens extends WC_Payment_Gateway {
 
     public function payment_fields() {
         do_action('woocommerce_credit_card_form_start', $this->id);
-        echo '<link rel="stylesheet" href="' . plugins_url('assets/css/token-payment.css', __FILE__) . '">';
+        wp_enqueue_style('bancard-token-payment', plugins_url('assets/css/token-payment.css', __FILE__), array(), WC_BANCARD_VERSION);
         ?>
         <div id="info-catastro-field"><p>Pague de forma rápida, segura y sencilla registrando su tarjeta en la sección <i>"Mi Cuenta"</i></p></div>
 
@@ -64,9 +64,9 @@ class WC_Gateway_Bancard_Tokens extends WC_Payment_Gateway {
                     $card_brand = "mastercard";
                 }
                 $imgcard = plugin_dir_url( __FILE__ )."../assets/credit-cards/".$card_brand.".png";
-                echo '<div class="bancard-card-box form-row" id="bancard-card-box"><input type="radio" id="card-'.$valor["card_id"].'" class="bancard-nmasked" name="bancard-card-token" value="'.$valor['alias_token'].'"><img class="bancard-cardbrand" src="'.$imgcard.'"><label for="card-'.$valor["card_id"].'" class="bancard-nmaskednumber">'.chunk_split($valor['card_masked_number'],4,' ').'</label>
+                echo ('<div class="bancard-card-box form-row" id="bancard-card-box"><input type="radio" id="card-'.$valor["card_id"].'" class="bancard-nmasked" name="bancard-card-token" value="'.$valor['alias_token'].'"><img class="bancard-cardbrand" src="'.$imgcard.'"><label for="card-'.$valor["card_id"].'" class="bancard-nmaskednumber">'.chunk_split($valor['card_masked_number'],4,' ').'</label>
                 <span class="bancard-cardvenc">Venc.</span>
-                <span class="bancard-cardvencinfo">08/21</span></div>';
+                <span class="bancard-cardvencinfo">08/21</span></div>');
             }
             echo '<input type="hidden" value="" name="bancard_card-id" id="bancard_card-id">';
         }
@@ -191,13 +191,13 @@ class WC_Gateway_Bancard_Tokens extends WC_Payment_Gateway {
             // Render here the script with the process_id
             ?>
             <!-- Include the script with the process_id -->
-            <script src="<?= $endpoint; ?>/checkout/javascript/dist/bancard-checkout-4.0.0.js"></script>
+            <script src="<?= esc_url($endpoint); ?>/checkout/javascript/dist/bancard-checkout-4.0.0.js"></script>
             <div id="bancard-token-form">
                 <p>Cargando el formulario de registro de tarjetas...</p>
             </div>
             <style>form#add_payment_method { display: none !important; }</style>
             <script>
-                Bancard.Cards.createForm('bancard-token-form', '<?= $process_id; ?>');
+                Bancard.Cards.createForm('bancard-token-form', '<?= esc_html($process_id); ?>');
             </script>
             <?php
         } else {
@@ -363,9 +363,22 @@ class WC_Gateway_Bancard_Tokens extends WC_Payment_Gateway {
             }
     
             echo '</table>';
-        } else {
+        }
+        if (empty(get_user_meta($user_id, 'billing_phone', true)) || empty(get_user_meta($user_id, 'billing_address_1', true))) {
+            // Verificar si el usuario tiene un teléfono y una dirección guardados
+            $user_phone = get_user_meta($user_id, 'billing_phone', true);
+            $user_address = get_user_meta($user_id, 'billing_address_1', true);
+
+            if (empty($user_phone) || empty($user_address)) {
+                wc_add_notice('Debe tener registrado un numero de telefono y una dirección en la sección facturación para agregar un nuevo método de pago', 'error');
+                wp_safe_redirect(wc_get_endpoint_url('edit-address'));
+                exit;
+            }
+        }    
+        else {
             echo '<p>No tienes métodos de pago guardados.</p>';
         }
+
     }
 
     public function delete_bancard_card($user_id, $card_token) {
@@ -517,7 +530,6 @@ class WC_Gateway_Bancard_Tokens extends WC_Payment_Gateway {
 
             return array(
                 'result' => 'pending',
-                'message' => 'Transacción pendiente',
                 'redirect' => $query,
             );
         }

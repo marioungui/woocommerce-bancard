@@ -100,7 +100,7 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
         ?>
         <div class="notice notice-error">
             <p>
-                <?php _e('La página requerida "bancard-payment" no está creada. Por favor, crea una página con el slug "bancard-payment" para que el plugin Bancard funcione correctamente.', 'bancard'); ?>
+                <?php esc_html(__('La página requerida "bancard-payment" no está creada. Por favor, crea una página con el slug "bancard-payment" para que el plugin Bancard funcione correctamente.', 'bancard')); ?>
             </p>
         </div>
         <?php

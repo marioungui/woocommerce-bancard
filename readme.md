@@ -1,4 +1,4 @@
-# WooCommerce Bancard Payment Gateway Plugin
+# Gateway de Bancard para WooCommerce
 
 Este es un plugin para WooCommerce que integra la pasarela de pagos Bancard para permitir a los usuarios realizar pagos con tarjeta de crédito y débito a través de la plataforma Bancard.
 
@@ -75,7 +75,7 @@ Esta clase extiende las funcionalidades de `WC_Gateway_Bancard` para manejar la 
 
 ## Contribuir
 
-Las contribuciones son bienvenidas. Si encuentras un error o tienes una sugerencia de mejora, por favor abre un [issue](https://github.com/tu-usuario/woocommerce-bancard/issues) o envía un pull request.
+Las contribuciones son bienvenidas. Si encuentras un error o tienes una sugerencia de mejora, por favor abre un [issue](https://github.com/marioungui/woocommerce-bancard/issues) o envía un pull request.
 
 ## Licencia
 
