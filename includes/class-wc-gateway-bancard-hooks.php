@@ -1,5 +1,18 @@
 <?php
-add_filter('woocommerce_order_button_text', 'bancard_custom_order_button_text');
+
+/**
+ * Elimina las columnas predeterminadas de la tabla de métodos de pago
+ * en la sección de cuenta del usuario.
+ *
+ * @param array $columns Un array con las columnas predeterminadas.
+ *
+ * @return array Un array vacío.
+ */
+function personalizar_metodos_de_pago( $columns ) {
+    // Devuelve un array vacío para eliminar las columnas predeterminadas
+    return [];
+}
+add_filter( 'woocommerce_account_payment_methods_columns', 'personalizar_metodos_de_pago', 10, 1 );
 
 /**
  * Modifica el texto del botón de pago en el carrito y en la página de pago
@@ -15,9 +28,7 @@ function bancard_custom_order_button_text($button_text) {
     }
     return $button_text;
 }
-
-
-add_filter('woocommerce_account_menu_items', 'bancard_add_payment_methods_link');
+add_filter('woocommerce_order_button_text', 'bancard_custom_order_button_text');
 
 /**
  * Agrega un enlace a la página de métodos de pago en el menú de la cuenta del usuario.
@@ -32,8 +43,7 @@ function bancard_add_payment_methods_link($menu_links) {
     
     return $menu_links;
 }
-
-add_action('woocommerce_account_payment-methods_endpoint', 'bancard_payment_methods_content');
+add_filter('woocommerce_account_menu_items', 'bancard_add_payment_methods_link');
 
 /**
  * Contenido de la página de métodos de pago.
@@ -43,11 +53,8 @@ add_action('woocommerce_account_payment-methods_endpoint', 'bancard_payment_meth
 function bancard_payment_methods_content() {
     $tokens = new WC_Gateway_Bancard_Tokens();
     $tokens->list_payment_methods();
-
-    echo '<a href="' . wc_get_endpoint_url('add-payment-method') . '" class="button">Agregar Método de Pago</a>';
 }
-
-add_action('init', 'bancard_add_add_payment_method_endpoint');
+add_action('woocommerce_account_payment-methods_endpoint', 'bancard_payment_methods_content');
 
 /**
  * Agrega el endpoint para agregar un método de pago
@@ -59,8 +66,7 @@ add_action('init', 'bancard_add_add_payment_method_endpoint');
 function bancard_add_add_payment_method_endpoint() {
     add_rewrite_endpoint('add-payment-method', EP_PAGES);
 }
-
-add_action('woocommerce_account_add-payment-method_endpoint', 'bancard_add_payment_method_content');
+add_action('init', 'bancard_add_add_payment_method_endpoint');
 
 /**
  * Contenido de la página para agregar un método de pago
@@ -71,9 +77,7 @@ function bancard_add_payment_method_content() {
     $tokens = new WC_Gateway_Bancard_Tokens();
     $tokens->add_payment_method();
 }
-
-
-add_action('woocommerce_order_actions', 'add_bancard_confirm_transaction_action');
+add_action('woocommerce_account_add-payment-method_endpoint', 'bancard_add_payment_method_content');
 
 /**
  * Agrega una acción al menú de acciones de la orden para confirmar manualmente
@@ -87,8 +91,7 @@ function add_bancard_confirm_transaction_action($actions) {
     $actions['bancard_confirm_transaction'] = __('Confirmar transacción con Bancard', 'woocommerce');
     return $actions;
 }
-
-add_action('woocommerce_order_action_bancard_confirm_transaction', 'process_bancard_confirm_transaction');
+add_action('woocommerce_order_actions', 'add_bancard_confirm_transaction_action');
 
 /**
  * Procesa la acción de confirmar una transacción de pago en la administración de pedidos
@@ -119,3 +122,23 @@ function process_bancard_confirm_transaction($order) {
         });
     }
 }
+add_action('woocommerce_order_action_bancard_confirm_transaction', 'process_bancard_confirm_transaction');
+
+// Check for updates from Github
+add_action('admin_init', function () {
+    $plugin_data = get_plugin_data(__FILE__);
+    $plugin_version = $plugin_data['Version'];
+    $repo_url = 'https://api.github.com/repos/marioungui/woocommerce-bancard/tags';
+    $response = wp_remote_get($repo_url);
+    if (is_wp_error($response)) {
+        return;
+    }
+    $tags = json_decode(wp_remote_retrieve_body($response));
+    $latest_tag = $tags[0]->name;
+    if ($latest_tag !== $plugin_version) {
+        add_action('admin_notices', function () use ($latest_tag) {
+            $message = 'Una nueva actualización del plugin WooCommerce Bancard esta disponible. <a href="https://github.com/marioungui/woocommerce-bancard/releases/tag/' . $latest_tag . '">Descargalo aquí.</a>';
+            echo '<div class="notice notice-info"><p>' . $message . '</p></div>';
+        });
+    }
+});

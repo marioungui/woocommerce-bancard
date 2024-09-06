@@ -23,8 +23,7 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
             'subscriptions_recurring',
             'subscription_cancellation',
             'subscription_suspension',
-            'subscription_reactivation',
-            'tokenization'
+            'subscription_reactivation'
         );
 
         add_action('woocommerce_receipt_' . $this->id, array($this, 'receipt_page'));
@@ -241,7 +240,6 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
             return;
         }
     }
-    
 
     /**
      * Crea una solicitud de pago a través de la API de Bancard.
@@ -293,7 +291,6 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
             return array('status' => 'fail', 'message' => $response_body['message']);
         }
     }
-
     /**
      * Filter to locate the template for the payment page.
      *
@@ -361,7 +358,6 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
         }
     }
     
-
     /**
      * Maneja la respuesta de la API de Bancard para una transacción.
      *
@@ -401,7 +397,6 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
         exit(json_encode(['status' => 'payment_fail']));
     }
     
-
     /**
      * Procesa un reembolso de una orden.
      *
@@ -469,7 +464,6 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
             return new WP_Error('bancard_refund_error', 'Reembolso no procesado: ' . $body['messages'][0]['dsc']);
         }
     }
-    
     
     /**
      * Shortcode para mostrar el formulario de pago de Bancard.

@@ -3,7 +3,7 @@
 Plugin Name: WooCommerce Bancard Gateway
 Plugin URI: https://emedos.com.py/woocommerce-bancard/
 Description: Pasarela de pagos Bancard para WooCommerce.
-Version: 1.0
+Version: v0.2.0
 Author: M2 Design
 Author URI: https://emedos.com.py/
 License: GPLv2 or later
@@ -14,6 +14,8 @@ Text Domain: woocommerce-bancard
 if (!defined('ABSPATH')) {
     exit; // Exit if accessed directly.
 }
+
+define('BANCARD_PLUGIN_VERSION', 'v0.2.0');
 
 // Hooks
 add_filter('woocommerce_payment_gateways', 'add_bancard_gateway');
@@ -26,6 +28,7 @@ add_action('admin_enqueue_scripts', 'bancard_admin_scripts');
 function add_bancard_gateway($gateways) {
     $gateways[] = 'WC_Gateway_Bancard';
     $gateways[] = 'WC_Gateway_Bancard_Zimple';
+    $gateways[] = 'WC_Gateway_Bancard_Tokens';
     return $gateways;
 }
 

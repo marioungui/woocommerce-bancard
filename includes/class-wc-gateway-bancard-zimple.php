@@ -22,14 +22,9 @@ class WC_Gateway_Bancard_Zimple extends WC_Payment_Gateway {
         // Actions
         add_action('woocommerce_receipt_' . $this->id, array($this, 'receipt_page'));
         add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'process_admin_options'));
-        add_action('woocommerce_api_' . strtolower(get_class($this)), array($this, 'check_response'));
 
         // Shortcode para la vista de pago
         add_shortcode('pago_bancard_zimple', array($this, 'bancard_zimple_payment_shortcode'));
-
-        // Añadir datos de la transacción a la orden
-        add_action('woocommerce_thankyou', [$this, 'display_bancard_zimple_transaction_details'], 20);
-        add_action('woocommerce_order_details_before_order_table_items', [$this, 'display_bancard_zimple_transaction_details'], 20);
     }
 
     public function init_form_fields() {
