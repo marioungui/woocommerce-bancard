@@ -118,7 +118,7 @@ function process_bancard_confirm_transaction($order) {
     } else {
         // Mostrar mensaje de éxito en el backend
         add_action('admin_notices', function() {
-            echo '<div class="notice notice-success"><p>' . __('Transacción confirmada exitosamente.', 'woocommerce') . '</p></div>';
+            echo esc_html('<div class="notice notice-success"><p>' . __('Transacción confirmada exitosamente.', 'woocommerce') . '</p></div>');
         });
     }
 }
@@ -126,8 +126,6 @@ add_action('woocommerce_order_action_bancard_confirm_transaction', 'process_banc
 
 // Check for updates from Github
 add_action('admin_init', function () {
-    $plugin_data = get_plugin_data(__FILE__);
-    $plugin_version = $plugin_data['Version'];
     $repo_url = 'https://api.github.com/repos/marioungui/woocommerce-bancard/releases/latest';
     $transient_name = 'woocommerce_bancard_latest_release';
     $transient = get_transient($transient_name);
@@ -142,9 +140,9 @@ add_action('admin_init', function () {
         // Cache the latest release for 24h
         set_transient($transient_name, $latest_release, DAY_IN_SECONDS);
     }
-    if (version_compare($latest_release->tag_name, $plugin_version, '>')) {
+    if (version_compare($latest_release->tag_name, WC_BANCARD_VERSION, '>')) {
         add_action('admin_notices', function () use ($latest_release) {
-            $message = 'Una nueva actualización del plugin WooCommerce Bancard esta disponible. <a href="' . $latest_release->zipball_url . '">Descargalo aquí.</a>';
+            $message = 'Una nueva actualización del plugin WooCommerce Bancard esta disponible. <a href="' . esc_url($latest_release->zipball_url) . '" target="_blank">Descargalo aquí.</a>';
             echo '<div class="notice notice-info"><p>' . $message . '</p></div>';
         });
     }
