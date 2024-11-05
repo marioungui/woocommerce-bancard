@@ -1,6 +1,10 @@
 <?php
 class WC_Gateway_Bancard_Tokens extends WC_Payment_Gateway {
 
+    public $public_key;
+    public $private_key;
+    public $environment;
+
     public function __construct() {
         $this->id = 'bancard_tokens';
         $this->icon = plugins_url('assets/images/bancard.png', __FILE__);
