@@ -25,6 +25,9 @@ class WC_Gateway_Bancard_Tokens extends WC_Payment_Gateway {
         $this->public_key = $this->get_option('public_key');
         $this->private_key = $this->get_option('private_key');
         $this->environment = $this->get_option('environment');
+
+        // Save Actions
+        add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'process_admin_options'));
     }
 
     public function payment_fields() {
@@ -66,7 +69,7 @@ class WC_Gateway_Bancard_Tokens extends WC_Payment_Gateway {
                 $imgcard = plugin_dir_url( __FILE__ )."../assets/credit-cards/".$card_brand.".png";
                 echo ('<div class="bancard-card-box form-row" id="bancard-card-box"><input type="radio" id="card-'.$valor["card_id"].'" class="bancard-nmasked" name="bancard-card-token" value="'.$valor['alias_token'].'"><img class="bancard-cardbrand" src="'.$imgcard.'"><label for="card-'.$valor["card_id"].'" class="bancard-nmaskednumber">'.chunk_split($valor['card_masked_number'],4,' ').'</label>
                 <span class="bancard-cardvenc">Venc.</span>
-                <span class="bancard-cardvencinfo">08/21</span></div>');
+                <span class="bancard-cardvencinfo">'.$valor['expiration_date'].'</span></div>');
             }
             echo '<input type="hidden" value="" name="bancard_card-id" id="bancard_card-id">';
         }
@@ -96,7 +99,7 @@ class WC_Gateway_Bancard_Tokens extends WC_Payment_Gateway {
                 'default' => 'Pagos con tarjetas registradas de Bancard',
             ),
             'public_key' => array(
-                'title' => 'Llave válida',
+                'title' => 'Llave pública',
                 'type' => 'text'
             ),
             'private_key' => array(
@@ -104,12 +107,13 @@ class WC_Gateway_Bancard_Tokens extends WC_Payment_Gateway {
                 'type' => 'password'
             ),
             'environment' => array(
-                'title' => 'Ambiente',
+                'title' => 'Servidor de pagos:',
                 'type' => 'select',
                 'options' => array(
                     'production' => 'Producción',
-                    'sandbox' => 'Sandbox'
-                )
+                    'staging' => 'Pruebas'
+                ),
+                'default' => 'staging'
             )
         );
     }

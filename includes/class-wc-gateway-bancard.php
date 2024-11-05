@@ -28,7 +28,7 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
 
         add_action('woocommerce_receipt_' . $this->id, array($this, 'receipt_page'));
 
-        // Actions
+        // Save Actions
         add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'process_admin_options'));
 
         // Payment listener/API hook
@@ -473,7 +473,7 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
      * @return string El HTML del formulario de pago.
      */
     public function bancard_payment_shortcode($atts) {
-        echo "<!-- Debug: Shortcode ejecutado -->";
+        error_log("<!-- Debug: Shortcode ejecutado -->");
         include plugin_dir_path(__FILE__) . '../templates/bancard-payment-page.php';
         return '';
     }

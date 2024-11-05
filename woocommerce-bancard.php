@@ -60,7 +60,7 @@ function init_bancard_gateway() {
 function bancard_enqueue_scripts() {
     if (is_checkout() || is_account_page()) {
         wp_enqueue_style('bancard-style', plugins_url('/assets/css/style.css', __FILE__), array(), WC_BANCARD_VERSION);
-        wp_enqueue_script('bancard-script', plugins_url('/assets/js/script.js', __FILE__), array('jquery'), WC_BANCARD_VERSION, true);
+        //wp_enqueue_script('bancard-script', plugins_url('/assets/js/script.js', __FILE__), array('jquery'), WC_BANCARD_VERSION, true);
     }
 }
 
