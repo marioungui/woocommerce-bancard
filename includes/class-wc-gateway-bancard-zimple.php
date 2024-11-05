@@ -1,6 +1,9 @@
 <?php
 
 class WC_Gateway_Bancard_Zimple extends WC_Payment_Gateway {
+    public $public_key;
+    public $private_key;
+    public $environment;
     public function __construct() {
         $this->id = 'bancard_zimple';
         $this->icon = ''; // Aquí puedes añadir la URL del icono para Zimple

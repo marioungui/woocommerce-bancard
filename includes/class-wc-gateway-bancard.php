@@ -1,5 +1,8 @@
 <?php
 class WC_Gateway_Bancard extends WC_Payment_Gateway {
+    public $public_key;
+    public $private_key;
+    public $environment;
     public function __construct() {
         $this->id = 'bancard';
         $this->icon = ''; // URL to the icon that will be displayed on the checkout page.

@@ -1,6 +1,5 @@
 <?php
 class WC_Gateway_Bancard_Tokens extends WC_Payment_Gateway {
-
     public $public_key;
     public $private_key;
     public $environment;
