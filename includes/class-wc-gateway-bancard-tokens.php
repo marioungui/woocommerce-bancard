@@ -6,7 +6,7 @@ class WC_Gateway_Bancard_Tokens extends WC_Payment_Gateway {
 
     public function __construct() {
         $this->id = 'bancard_tokens';
-        $this->icon = plugins_url('assets/images/bancard.png', __FILE__);
+        $this->icon = plugins_url('assets/images/token.svg', __DIR__);
         $this->has_fields = true;
         $this->method_title = 'Pagos con tarjetas registradas de Bancard';
         $this->method_description = 'Pagos con tarjetas registradas de Bancard';
@@ -76,6 +76,9 @@ class WC_Gateway_Bancard_Tokens extends WC_Payment_Gateway {
             }
             echo '<input type="hidden" value="" name="bancard_card-id" id="bancard_card-id">';
         }
+		else {
+			echo '<p><br>No posee ninguna tarjeta registrada. Registre su tarjeta de crédito o débito en la sección de <a href="' . get_permalink(get_option('woocommerce_myaccount_page_id')) . '">Mi Cuenta</a></p>';
+		}
 
         do_action('woocommerce_credit_card_form_end', $this->id);
     }

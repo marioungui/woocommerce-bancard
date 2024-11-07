@@ -6,7 +6,7 @@ class WC_Gateway_Bancard_Zimple extends WC_Payment_Gateway {
     public $environment;
     public function __construct() {
         $this->id = 'bancard_zimple';
-        $this->icon = ''; // Aquí puedes añadir la URL del icono para Zimple
+        $this->icon = plugins_url('assets/images/zimple.png', __DIR__);
         $this->has_fields = false;
         $this->method_title = 'Bancard Zimple';
         $this->method_description = 'Pasarela de pagos Zimple para WooCommerce.';
@@ -85,9 +85,9 @@ class WC_Gateway_Bancard_Zimple extends WC_Payment_Gateway {
                 $process_id = $result['process_id'];
                 update_post_meta($order_id, '_bancard_process_id', $process_id);
             } else {
-                wc_add_notice('Error en la respuesta de Bancard: ' . $result['messages'][0]['dsc'], 'error');
+                wc_add_notice('Error en la respuesta de Bancard: ' . $result['message'], 'error');
                 wp_delete_post($order_id, true);
-                return array('result' => 'failure');
+                return array('result' => 'failure', 'redirect' => wc_get_cart_url(), 'error' => $result['messages'][0]['dsc']);
             }
         }
 
@@ -164,7 +164,7 @@ class WC_Gateway_Bancard_Zimple extends WC_Payment_Gateway {
         if ($response_body['status'] == 'success') {
             return array('status' => 'success', 'process_id' => $response_body['process_id']);
         } else {
-            return array('status' => 'fail', 'message' => $response_body['message']);
+            return array('status' => 'fail', 'message' => $response_body['messages'][0]['dsc']);
         }
     }
 

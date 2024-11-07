@@ -9,6 +9,21 @@
     display: none;
   }
 
+li.payment_method_bancard_tokens label img, li.payment_method_bancard_zimple label img {
+    height: 42px;
+}
+
+li.payment_method_bancard label img {
+	height: 22px;
+}
+
+div#bancard-payment-form {
+    max-width: 900px;
+    display: table;
+    width: calc(100% - 20px);
+    margin: 40px auto;
+}
+
   @font-face {
     font-family: 'OCRA';
     src: url("../fonts/OCRA.otf");

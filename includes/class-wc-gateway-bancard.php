@@ -5,7 +5,7 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
     public $environment;
     public function __construct() {
         $this->id = 'bancard';
-        $this->icon = ''; // URL to the icon that will be displayed on the checkout page.
+        $this->icon = plugins_url('assets/images/bancard.png', __DIR__);
         $this->has_fields = false;
         $this->method_title = 'Bancard';
         $this->method_description = 'Pasarela de pagos Bancard para WooCommerce.';
@@ -184,12 +184,15 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
     public function process_payment($order_id) {
         $order = wc_get_order($order_id);
         $process_id = get_post_meta($order_id, '_bancard_process_id', true);
+		error_log("Procesando Pago");
+		error_log("Environment: {$url}");
     
         // Si ya existe un process_id, usamos el mismo
         if (!$process_id) {
             // Generar una solicitud a la API de Bancard para obtener el process_id
             $endpoint = $this->environment == 'production' ? 'https://vpos.infonet.com.py' : 'https://vpos.infonet.com.py:8888';
             $url = $endpoint . '/vpos/api/0.3/single_buy';
+			error_log("Environment: {$url}");
             $amount = number_format($order->get_total(), 2, '.', '');
             $currency = 'PYG';
             $token = md5($this->private_key . $order_id . $amount . $currency);
@@ -377,8 +380,12 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
         if (isset($response['operation']) && isset($response['operation']['shop_process_id'])) {
             $order_id = $response['operation']['shop_process_id'];
             $order = wc_get_order($order_id);
+			
+			if (!$order) {
+				exit(json_encode(['status' => 'payment_fail']));
+			}
     
-            if ($response['operation']['response'] == 'S') {
+            if ($response['operation']['response'] == 'S' && $order != false && $response['operation']['response_code'] == "00") {
                 // Guardar los datos de autorización y ticket en los metadatos de la orden
                 update_post_meta($order_id, '_bancard_authorization_number', $response['operation']['authorization_number']);
                 update_post_meta($order_id, '_bancard_ticket_number', $response['operation']['ticket_number']);
@@ -509,8 +516,11 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
      * @return bool|WP_Error True si la confirmación fue exitosa, WP_Error en caso de error.
      */
     public function confirm_transaction($order_id) {
+		error_log("Confirmando transacción con order_id: {$order_id}");
         $order = wc_get_order($order_id);
         $shop_process_id = $order->get_id();
+		
+		error_log("ID De transacción: {$shop_process_id}");
     
         $endpoint = $this->environment == 'production' ? 'https://vpos.infonet.com.py' : 'https://vpos.infonet.com.py:8888';
         $url = $endpoint . '/vpos/api/0.3/single_buy/confirmations';
@@ -525,6 +535,7 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
             )
         );
     
+		error_log("Iniciando llamada a wp_remote_post");
         $response = wp_remote_post($url, array(
             'method' => 'POST',
             'body' => json_encode($data),
@@ -533,22 +544,28 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
     
         if (is_wp_error($response)) {
             return new WP_Error('bancard_confirmation_error', 'Transaction confirmation failed: ' . $response->get_error_message());
+			error_log("Error al obtener respuesta: {$response->get_error_message()}");
         }
     
+		error_log("Decodificando JSON");
         $body = json_decode(wp_remote_retrieve_body($response), true);
     
         if ($body['status'] == 'success' && $body['confirmation']['response'] == 'S') {
+			error_log("Condicion 1");
             if ($order->get_status() != 'processing') {
+				error_log("Condicion 2");
                 $order->payment_complete();
             }
             $order->add_order_note('Transacción Confirmada por Bancard el ' . current_datetime()->format('Y-m-d H:i:s'). '.');
             return true;
         }
         else if ($body['status'] == 'error' && $body['messages'][0]['key'] == 'PaymentNotFoundError') {
+			error_log("Condicion 3");
             $order->update_status('failed', 'Transaction confirmation failed: ' . $body['messages'][0]['dsc']);
             return new WP_Error('bancard_confirmation_error', 'Transaction confirmation failed: ' . $body['messages'][0]['dsc']);
         }
         else{
+			error_log("Condicion 4: ".print_r($body, true));
             return new WP_Error('bancard_confirmation_error', 'Transaction confirmation failed: ' . $body['messages'][0]['dsc']);
         }
     }
