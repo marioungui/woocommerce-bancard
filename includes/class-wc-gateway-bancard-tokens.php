@@ -360,12 +360,14 @@ class WC_Gateway_Bancard_Tokens extends WC_Payment_Gateway {
                     'card_id' => $card['card_id'],
                     'card_token' => $card['alias_token'],
                 ), wc_get_endpoint_url('payment-methods'));
+
+                $card_type = ($card['card_type'] == "credit") ? "Credito" : "Debito";
     
                 echo '<tr>';
                 echo '<td>' . esc_html($card['card_masked_number']) . '</td>';
                 echo '<td>' . esc_html($card['expiration_date']) . '</td>';
                 echo '<td>' . esc_html($card['card_brand']) . '</td>';
-                echo '<td>' . esc_html($card['card_type']) . '</td>';
+                echo '<td>' . esc_html($card_type) . '</td>';
                 echo '<td>';
                 echo '<a href="' . esc_url($delete_url) . '" onclick="return confirm(\'¿Estás seguro de que deseas eliminar esta tarjeta?\');" class="button">Eliminar</a>';
                 echo '</td>';
