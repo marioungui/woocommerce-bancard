@@ -394,6 +394,8 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
                     $response['operation']['ticket_number'])
                 );
                 wc_reduce_stock_levels($order_id);
+                header('Content-Type: application/json');
+                http_response_code(200);
                 exit(json_encode(['status' => 'success']));
             } else {
                 $order->update_status('failed', 'Payment failed: ' . $response['message']);
