@@ -140,11 +140,13 @@ add_action('admin_init', function () {
         // Cache the latest release for 24h
         set_transient($transient_name, $latest_release, DAY_IN_SECONDS);
     }
-    if (version_compare($latest_release->tag_name, WC_BANCARD_VERSION, '>')) {
-        add_action('admin_notices', function () use ($latest_release) {
-            $message = 'Una nueva actualización del plugin WooCommerce Bancard esta disponible. <a href="' . esc_url($latest_release->zipball_url) . '" target="_blank">Descargalo aquí.</a>';
-            echo '<div class="notice notice-info"><p>' . $message . '</p></div>';
-        });
+    if (isset($response)) {
+        if (version_compare($latest_release->tag_name, WC_BANCARD_VERSION, '>')) {
+            add_action('admin_notices', function () use ($latest_release) {
+                $message = 'Una nueva actualización del plugin WooCommerce Bancard esta disponible. <a href="' . esc_url($latest_release->zipball_url) . '" target="_blank">Descargalo aquí.</a>';
+                echo '<div class="notice notice-info"><p>' . $message . '</p></div>';
+            });
+        }
     }
 });
 

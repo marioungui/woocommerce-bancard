@@ -184,15 +184,12 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
     public function process_payment($order_id) {
         $order = wc_get_order($order_id);
         $process_id = get_post_meta($order_id, '_bancard_process_id', true);
-		error_log("Procesando Pago");
-		error_log("Environment: {$url}");
     
         // Si ya existe un process_id, usamos el mismo
         if (!$process_id) {
             // Generar una solicitud a la API de Bancard para obtener el process_id
             $endpoint = $this->environment == 'production' ? 'https://vpos.infonet.com.py' : 'https://vpos.infonet.com.py:8888';
             $url = $endpoint . '/vpos/api/0.3/single_buy';
-			error_log("Environment: {$url}");
             $amount = number_format($order->get_total(), 2, '.', '');
             $currency = 'PYG';
             $token = md5($this->private_key . $order_id . $amount . $currency);
