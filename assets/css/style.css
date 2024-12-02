@@ -9,6 +9,10 @@
     display: none;
   }
 
+table#Bancard-cards-table + p {
+    display: none !important;
+}
+
 li.payment_method_bancard_tokens label img, li.payment_method_bancard_zimple label img {
     height: 42px;
 }
