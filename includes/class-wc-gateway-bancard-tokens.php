@@ -35,7 +35,6 @@ class WC_Gateway_Bancard_Tokens extends WC_Payment_Gateway {
 
     public function payment_fields() {
         do_action('woocommerce_credit_card_form_start', $this->id);
-        wp_enqueue_style('bancard-token-payment', plugins_url('assets/css/token-payment.css', __FILE__), array(), WC_BANCARD_VERSION);
         ?>
         <div id="info-catastro-field"><p>Pague de forma rápida, segura y sencilla registrando su tarjeta en la sección <i>"Mi Cuenta"</i></p></div>
 
