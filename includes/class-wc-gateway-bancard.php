@@ -399,7 +399,7 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
                 $order->update_status('failed', 'Payment failed: ' . $response['message']);
             }
         }
-    
+        header('Content-Type: application/json');
         http_response_code(400);
         exit(json_encode(['status' => 'payment_fail']));
     }
