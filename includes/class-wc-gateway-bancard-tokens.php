@@ -477,6 +477,9 @@ class WC_Gateway_Bancard_Tokens extends WC_Payment_Gateway {
     }
 
     public function process_payment($order_id) {
+        error_log("Procesando Pago de Bancard Tokens");
+        error_log("Order ID: " . $order_id);
+        error_log("Token: " . CATASTRO_PAGOTOKEN);
         $order = wc_get_order($order_id);
         $amount = number_format($order->get_total(), 2, '.', '');
         $token = md5($this->private_key . $order_id . "charge" . $amount . $order->get_currency() . CATASTRO_PAGOTOKEN);
@@ -501,23 +504,28 @@ class WC_Gateway_Bancard_Tokens extends WC_Payment_Gateway {
         );
 
         $endpoint = $this->environment == 'production' ? 'https://vpos.infonet.com.py/vpos/api/0.3/charge' : 'https://vpos.infonet.com.py:8888/vpos/api/0.3/charge';
+        error_log("Conectando al endpoint: " . $endpoint);
         $response = wp_remote_post($endpoint, array(
             'method' => 'POST',
             'body' => json_encode($args),
             'headers' => array('Content-Type' => 'application/json'),
+            'timeout' => 30,
         ));
 
         if (is_wp_error($response)) {
-            return array('result' => 'fail', 'message' => "Test 1");
+            error_log("Error al comunicarse con Bancard: " . $response->get_error_message());
+            return array('result' => 'failure', 'message' => "Test 1");
         }
 
         $body = json_decode(wp_remote_retrieve_body($response), true);
 
         if (!$body) {
-            return array('resutl' => 'fail', 'message' => "Respuesta de la API no es válida");
+            error_log("Respuesta de la API no es válida");
+            return array('result' => 'failure', 'message' => "Respuesta de la API no es válida");
         }
 
         if ($body['status'] === 'error') {
+            error_log("Error al realizar el pago: " . $body['messages'][0]['dsc']);
             return array(
                 'result' => 'failure',
                 'message' => $body['messages'][0]['dsc'],
@@ -526,7 +534,7 @@ class WC_Gateway_Bancard_Tokens extends WC_Payment_Gateway {
 
         if ($body['status'] === 'success' && $body['confirmation']['response'] === "S") {
             $order->payment_complete();
-
+            error_log("Pago realizado exitosamente");
             return array(
                 'result' => 'success',
                 'redirect' => $this->get_return_url($order),
@@ -539,11 +547,15 @@ class WC_Gateway_Bancard_Tokens extends WC_Payment_Gateway {
                 ),
                 wc_get_page_permalink('bancard-payment')
             );
+            error_log("Redirigiendo a: " . $query);
+            // Cambiar el estado del pedido a "pendiente"
+            $order->update_status('pending', 'Esperando pago.');
 
-            return array(
-                'result' => 'pending',
-                'redirect' => $query,
-            );
+            // Retornar el resultado como exitoso y redirigir
+            return [
+                'result'   => 'success',
+                'redirect' => $query, // URL a donde querés redirigir al cliente
+            ];
         }
         else {
             error_log('Error: ' . print_r($body, true));
