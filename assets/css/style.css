@@ -3,11 +3,15 @@
     margin: 0 auto;
     margin-bottom: 10px;
     text-align: center;
-  }
+}
 
-  .woocommerce-MyAccount-content > p {
+table.woocommerce-MyAccount-paymentMethods + a + p {
+    margin-top: 15px;
+}
+
+.woocommerce-MyAccount-content > p {
     display: none;
-  }
+}
 
 table#Bancard-cards-table + p {
     display: none !important;
