@@ -542,8 +542,8 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
         ));
     
         if (is_wp_error($response)) {
+            error_log("Error al obtener respuesta: {$response->get_error_message()}");
             return new WP_Error('bancard_confirmation_error', 'Transaction confirmation failed: ' . $response->get_error_message());
-			error_log("Error al obtener respuesta: {$response->get_error_message()}");
         }
     
 		error_log("Decodificando JSON");
