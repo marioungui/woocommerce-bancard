@@ -377,12 +377,16 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
         if (isset($response['operation']) && isset($response['operation']['shop_process_id'])) {
             $order_id = $response['operation']['shop_process_id'];
             $order = wc_get_order($order_id);
-			
-			if (!$order) {
-				exit(json_encode(['status' => 'payment_fail']));
-			}
+            
+            if (!$order) {
+                exit(json_encode(['status' => 'payment_fail']));
+            }
     
-            if ($response['operation']['response'] == 'S' && $order != false && $response['operation']['response_code'] == "00") {
+            // Validación correcta: response = 'S' Y response_code = '00' Y authorization_number no sea null
+            if ($response['operation']['response'] == 'S' && 
+                $response['operation']['response_code'] == "00" &&
+                !empty($response['operation']['authorization_number'])) {
+                
                 // Guardar los datos de autorización y ticket en los metadatos de la orden
                 update_post_meta($order_id, '_bancard_authorization_number', $response['operation']['authorization_number']);
                 update_post_meta($order_id, '_bancard_ticket_number', $response['operation']['ticket_number']);
@@ -398,12 +402,26 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
                 http_response_code(200);
                 exit(json_encode(['status' => 'success']));
             } else {
-                $order->update_status('failed', 'Payment failed: ' . $response['message']);
+                // Manejar transacciones fallidas
+                $error_message = isset($response['operation']['response_description']) ? 
+                    $response['operation']['response_description'] : 'Payment failed';
+                
+                if (isset($response['operation']['extended_response_description'])) {
+                    $error_message .= ' - ' . $response['operation']['extended_response_description'];
+                }
+                
+                $order->update_status('failed', $error_message);
+                $order->add_order_note(
+                    sprintf('Payment failed via Bancard. Response Code: %s, Description: %s', 
+                    $response['operation']['response_code'], 
+                    $error_message)
+                );
             }
         }
+        
         header('Content-Type: application/json');
-        http_response_code(400);
-        exit(json_encode(['status' => 'payment_fail']));
+        http_response_code(200);
+        exit(json_encode(['status' => 'success']));
     }
     
     /**
@@ -515,15 +533,15 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
      * @return bool|WP_Error True si la confirmación fue exitosa, WP_Error en caso de error.
      */
     public function confirm_transaction($order_id) {
-		error_log("Confirmando transacción con order_id: {$order_id}");
+        error_log("Confirmando transacción con order_id: {$order_id}");
         $order = wc_get_order($order_id);
         $shop_process_id = $order->get_id();
-		
-		error_log("ID De transacción: {$shop_process_id}");
+        
+        error_log("ID De transacción: {$shop_process_id}");
     
         $endpoint = $this->environment == 'production' ? 'https://vpos.infonet.com.py' : 'https://vpos.infonet.com.py:8888';
         $url = $endpoint . '/vpos/api/0.3/single_buy/confirmations';
-
+    
         $token = md5($this->private_key . $shop_process_id . "get_confirmation");
     
         $data = array(
@@ -534,7 +552,7 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
             )
         );
     
-		error_log("Iniciando llamada a wp_remote_post");
+        error_log("Iniciando llamada a wp_remote_post");
         $response = wp_remote_post($url, array(
             'method' => 'POST',
             'body' => json_encode($data),
@@ -546,26 +564,75 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
             return new WP_Error('bancard_confirmation_error', 'Transaction confirmation failed: ' . $response->get_error_message());
         }
     
-		error_log("Decodificando JSON");
+        error_log("Decodificando JSON");
         $body = json_decode(wp_remote_retrieve_body($response), true);
     
-        if ($body['status'] == 'success' && $body['confirmation']['response'] == 'S') {
-			error_log("Condicion 1");
+        // Verificar que la respuesta sea válida
+        if (!$body || !isset($body['status'])) {
+            error_log("Respuesta JSON inválida");
+            return new WP_Error('bancard_confirmation_error', 'Invalid JSON response from Bancard');
+        }
+    
+        // Transacción exitosa: status = success, response = S, response_code = 00, y authorization_number presente
+        if ($body['status'] == 'success' && 
+            isset($body['confirmation']) &&
+            $body['confirmation']['response'] == 'S' && 
+            $body['confirmation']['response_code'] == '00' &&
+            !empty($body['confirmation']['authorization_number'])) {
+            
+            error_log("Transacción confirmada exitosamente");
+            
+            // Guardar datos de autorización si no existen
+            if (!get_post_meta($order_id, '_bancard_authorization_number', true)) {
+                update_post_meta($order_id, '_bancard_authorization_number', $body['confirmation']['authorization_number']);
+                update_post_meta($order_id, '_bancard_ticket_number', $body['confirmation']['ticket_number']);
+            }
+            
             if ($order->get_status() != 'processing') {
-				error_log("Condicion 2");
+                error_log("Completando pago");
                 $order->payment_complete();
             }
             $order->add_order_note('Transacción Confirmada por Bancard el ' . current_datetime()->format('Y-m-d H:i:s'). '.');
             return true;
         }
-        else if ($body['status'] == 'error' && $body['messages'][0]['key'] == 'PaymentNotFoundError') {
-			error_log("Condicion 3");
-            $order->update_status('failed', 'Transaction confirmation failed: ' . $body['messages'][0]['dsc']);
-            return new WP_Error('bancard_confirmation_error', 'Transaction confirmation failed: ' . $body['messages'][0]['dsc']);
+        // Error específico: PaymentNotFoundError
+        else if ($body['status'] == 'error' && 
+                 isset($body['messages']) && 
+                 is_array($body['messages']) && 
+                 !empty($body['messages']) &&
+                 $body['messages'][0]['key'] == 'PaymentNotFoundError') {
+            
+            error_log("PaymentNotFoundError");
+            $error_message = isset($body['messages'][0]['dsc']) ? $body['messages'][0]['dsc'] : 'Payment not found';
+            $order->update_status('failed', 'Transaction confirmation failed: ' . $error_message);
+            return new WP_Error('bancard_confirmation_error', 'Transaction confirmation failed: ' . $error_message);
         }
-        else{
-			error_log("Condicion 4: ".print_r($body, true));
-            return new WP_Error('bancard_confirmation_error', 'Transaction confirmation failed: ' . $body['messages'][0]['dsc']);
+        // Transacción denegada (response_code != 00)
+        else if ($body['status'] == 'success' && 
+                 isset($body['confirmation']) &&
+                 $body['confirmation']['response_code'] != '00') {
+            
+            error_log("Transacción denegada con código: " . $body['confirmation']['response_code']);
+            $error_message = isset($body['confirmation']['response_description']) ? 
+                $body['confirmation']['response_description'] : 'Transaction denied';
+            
+            if (isset($body['confirmation']['extended_response_description'])) {
+                $error_message .= ' - ' . $body['confirmation']['extended_response_description'];
+            }
+            
+            $order->update_status('failed', 'Transaction denied: ' . $error_message);
+            return new WP_Error('bancard_confirmation_error', 'Transaction denied: ' . $error_message);
+        }
+        // Otros errores
+        else {
+            error_log("Error desconocido: " . print_r($body, true));
+            $error_message = 'Unknown error';
+            
+            if (isset($body['messages']) && is_array($body['messages']) && !empty($body['messages'])) {
+                $error_message = isset($body['messages'][0]['dsc']) ? $body['messages'][0]['dsc'] : 'Unknown error';
+            }
+            
+            return new WP_Error('bancard_confirmation_error', 'Transaction confirmation failed: ' . $error_message);
         }
     }
     
