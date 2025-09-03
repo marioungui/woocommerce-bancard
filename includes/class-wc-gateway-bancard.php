@@ -573,7 +573,7 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
             return new WP_Error('bancard_confirmation_error', 'Invalid JSON response from Bancard');
         }
     
-        // Transacción exitosa: status = success, response = S, response_code = 00, y authorization_number presente
+        // Transacción exitosa
         if ($body['status'] == 'success' && 
             isset($body['confirmation']) &&
             $body['confirmation']['response'] == 'S' && 
@@ -604,7 +604,11 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
             
             error_log("PaymentNotFoundError");
             $error_message = isset($body['messages'][0]['dsc']) ? $body['messages'][0]['dsc'] : 'Payment not found';
-            $order->update_status('failed', 'Transaction confirmation failed: ' . $error_message);
+            
+            // Cambiar estado y agregar nota privada
+            $order->update_status('failed', 'Transaction confirmation failed: Payment not found');
+            $order->add_order_note('Error de confirmación Bancard: ' . $error_message . ' - ' . current_datetime()->format('Y-m-d H:i:s'));
+            
             return new WP_Error('bancard_confirmation_error', 'Transaction confirmation failed: ' . $error_message);
         }
         // Transacción denegada (response_code != 00)
@@ -620,7 +624,16 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
                 $error_message .= ' - ' . $body['confirmation']['extended_response_description'];
             }
             
-            $order->update_status('failed', 'Transaction denied: ' . $error_message);
+            // Cambiar estado y agregar nota privada detallada
+            $order->update_status('failed', 'Transaction denied by Bancard');
+            $order->add_order_note(
+                sprintf('Pago denegado por Bancard - Código: %s, Descripción: %s - %s', 
+                    $body['confirmation']['response_code'], 
+                    $error_message,
+                    current_datetime()->format('Y-m-d H:i:s')
+                )
+            );
+            
             return new WP_Error('bancard_confirmation_error', 'Transaction denied: ' . $error_message);
         }
         // Otros errores
@@ -631,6 +644,10 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
             if (isset($body['messages']) && is_array($body['messages']) && !empty($body['messages'])) {
                 $error_message = isset($body['messages'][0]['dsc']) ? $body['messages'][0]['dsc'] : 'Unknown error';
             }
+            
+            // Cambiar estado y agregar nota privada
+            $order->update_status('failed', 'Transaction confirmation failed');
+            $order->add_order_note('Error desconocido de confirmación Bancard: ' . $error_message . ' - ' . current_datetime()->format('Y-m-d H:i:s'));
             
             return new WP_Error('bancard_confirmation_error', 'Transaction confirmation failed: ' . $error_message);
         }
