@@ -1,35 +1,42 @@
 <?php
-if (!defined('ABSPATH')) {
-    exit; // Exit if accessed directly.
-}
 
-/* Template for Bancard Payment Page */
+if (!defined('ABSPATH')) {
+    exit;
+}
 
 get_header();
 
-$bancard = new WC_Gateway_Bancard();
-$environment = $bancard->environment;
-$endpoint = $environment == 'production' ? 'https://vpos.infonet.com.py' : 'https://vpos.infonet.com.py:8888';
+$process_id = isset($_GET['process_id']) ? sanitize_text_field(wp_unslash($_GET['process_id'])) : '';
+$mode = isset($_GET['mode']) ? sanitize_text_field(wp_unslash($_GET['mode'])) : 'checkout';
+$gateway_id = isset($_GET['gateway']) ? sanitize_text_field(wp_unslash($_GET['gateway'])) : 'bancard';
+$gateway = function_exists('wc_bancard_get_gateway_instance') ? wc_bancard_get_gateway_instance($gateway_id) : new WC_Gateway_Bancard();
+$endpoint = $gateway->get_api_base_url();
 
-$process_id = isset($_GET['process_id']) ? sanitize_text_field($_GET['process_id']) : '';
-$zimple = isset($_GET['zimple']) ? sanitize_text_field($_GET['zimple']) : false;
+$modes = array(
+    'checkout' => 'Checkout',
+    'zimple'   => 'Zimple',
+    'charge3ds'=> 'Charge3DS',
+);
 
-if ($process_id) {
+$js_method = isset($modes[$mode]) ? $modes[$mode] : 'Checkout';
+
+if ($process_id) :
     wp_enqueue_script('bancard-checkout', $endpoint . '/checkout/javascript/dist/bancard-checkout-4.0.0.js', array(), null, false);
-	wp_enqueue_style('bancard-style', plugins_url('/assets/css/style.css', __FILE__), array(), WC_BANCARD_VERSION);
+    wp_enqueue_style('bancard-style', plugins_url('assets/css/style.css', WC_BANCARD_PLUGIN_FILE), array(), WC_BANCARD_VERSION);
     ?>
-    <div id="bancard-payment-form" style="display: table; width: calc(100% - 20px); max-width: 900px; margin: 40px auto">
-        <p>Cargando el formulario de pago...</p>
+    <div id="bancard-payment-form" style="display:table;width:calc(100% - 20px);max-width:900px;margin:40px auto">
+        <p><?php echo esc_html__('Cargando el formulario de pago de Bancard...', 'woocommerce-bancard'); ?></p>
     </div>
-
     <script>
-		jQuery(document).ready(function () {
-			Bancard.<?= $zimple ? 'Zimple' : 'Checkout'?>.createForm('bancard-payment-form', '<?= esc_html($process_id); ?>');	   
-		});         
+        window.addEventListener('load', function () {
+            if (window.Bancard && Bancard.<?php echo esc_js($js_method); ?>) {
+                Bancard.<?php echo esc_js($js_method); ?>.createForm('bancard-payment-form', '<?php echo esc_js($process_id); ?>');
+            }
+        });
     </script>
     <?php
-} else {
-    echo '<p>Error: No se encontró el ID del proceso.</p>';
-}
+else :
+    echo '<p>' . esc_html__('No se encontró el identificador de proceso de Bancard.', 'woocommerce-bancard') . '</p>';
+endif;
 
 get_footer();

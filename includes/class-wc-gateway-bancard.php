@@ -1,309 +1,276 @@
 <?php
-class WC_Gateway_Bancard extends WC_Payment_Gateway {
-    public $public_key;
-    public $private_key;
-    public $environment;
+
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+class WC_Gateway_Bancard extends WC_Gateway_Bancard_Base {
     public function __construct() {
-        $this->id = 'bancard';
-        $this->icon = plugins_url('assets/images/bancard.png', __DIR__);
-        $this->has_fields = false;
-        $this->method_title = 'Bancard';
-        $this->method_description = 'Pasarela de pagos Bancard para WooCommerce.';
-
-        // Load the settings.
-        $this->init_form_fields();
-        $this->init_settings();
-
-        // Define user set variables
-        $this->title = $this->get_option('title');
-        $this->description = $this->get_option('description');
-        $this->public_key = $this->get_option('public_key');
-        $this->private_key = $this->get_option('private_key');
-        $this->environment = $this->get_option('environment');
-        $this->supports = array (
-            'refunds',
-            'subscriptions',
-            'subscriptions_recurring',
-            'subscription_cancellation',
-            'subscription_suspension',
-            'subscription_reactivation'
+        $this->boot_gateway(
+            array(
+                'id'                 => 'bancard',
+                'icon'               => plugins_url('assets/images/bancard.png', __DIR__),
+                'has_fields'         => false,
+                'method_title'       => 'Bancard',
+                'method_description' => __('Pagos embebidos con Bancard.', 'woocommerce-bancard'),
+                'supports'           => array('products', 'refunds'),
+            )
         );
 
-        add_action('woocommerce_receipt_' . $this->id, array($this, 'receipt_page'));
-
-        // Save Actions
-        add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'process_admin_options'));
-
-        // Payment listener/API hook
         add_action('woocommerce_api_' . strtolower(get_class($this)), array($this, 'check_response'));
-
-        // Support for WooCommerce Subscriptions
-        if (class_exists('WC_Subscriptions_Order')) {
-            add_action('woocommerce_scheduled_subscription_payment_' . $this->id, array($this, 'process_subscription_payment'), 10, 2);
-        }
-        // Hook para verificar la existencia de la página al inicializar el plugin
         add_action('admin_init', array($this, 'check_bancard_payment_page'));
-
-        // Hook para agregar el template de la pasarela de pagos
         add_filter('template_include', array($this, 'bancard_payment_template'));
-        
-        // Shortcode para la vista de pago
         add_shortcode('pago_bancard', array($this, 'bancard_payment_shortcode'));
-
-        // Añadir datos de la transacción a la orden
-        add_action('woocommerce_thankyou', [$this, 'display_bancard_transaction_details'], 20);
-        add_action('woocommerce_order_details_before_order_table_items', [$this, 'display_bancard_transaction_details'], 20);
+        add_action('woocommerce_thankyou', array($this, 'display_bancard_transaction_details'), 20);
+        add_action('woocommerce_order_details_before_order_table_items', array($this, 'display_bancard_transaction_details'), 20);
     }
 
-    /**
-     * Verifica la existencia de la página de pago de Bancard al inicializar el plugin.
-     *
-     * Si la página no existe, agrega una notificación en la sección de administración
-     * de WordPress.
-     *
-     * @since 1.0.0
-     */
-    function check_bancard_payment_page() {
-        $payment_page = get_page_by_path('bancard-payment');
-        if (!$payment_page) {
-            // Si la página no existe, agrega una notificación
-            add_action('admin_notices', 'bancard_payment_page_missing_notice');
-        }
+    public function init_form_fields() {
+        $this->form_fields = $this->get_common_form_fields(
+            array(
+                'title' => array(
+                    'title'       => __('Título', 'woocommerce-bancard'),
+                    'type'        => 'text',
+                    'description' => __('Texto visible para el cliente durante el checkout.', 'woocommerce-bancard'),
+                    'default'     => 'Tarjeta de crédito/débito (Bancard)',
+                    'desc_tip'    => true,
+                ),
+                'description' => array(
+                    'title'       => __('Descripción', 'woocommerce-bancard'),
+                    'type'        => 'textarea',
+                    'description' => __('Descripción visible en el checkout.', 'woocommerce-bancard'),
+                    'default'     => __('Pagá con tu tarjeta vía Bancard.', 'woocommerce-bancard'),
+                ),
+            )
+        );
     }
 
-    /**
-     * Muestra los detalles de la transacción realizada con la pasarela de pagos de Bancard.
-     *
-     * @param int $order_id ID de la orden a la que se le mostrarán los detalles de transacción.
-     */
-    function display_bancard_transaction_details($order_id) {
+    public function process_payment($order_id) {
         $order = wc_get_order($order_id);
-    
-        $authorization_number = get_post_meta($order_id, '_bancard_authorization_number', true);
-        $ticket_number = get_post_meta($order_id, '_bancard_ticket_number', true);
-    
-        if ($authorization_number && $ticket_number) {
-            echo '<h2>' . __('Detalles de la Transacción', 'bancard') . '</h2>';
-            echo '<p><strong>' . __('N° de Autorización VPOS:', 'bancard') . '</strong> ' . esc_html($authorization_number) . '</p>';
-            echo '<p><strong>' . __('N° de Ticket VPOS:', 'bancard') . '</strong> ' . esc_html($ticket_number) . '</p>';
+        if (!$order) {
+            wc_add_notice(__('No se pudo recuperar la orden para iniciar el pago.', 'woocommerce-bancard'), 'error');
+            return array('result' => 'failure');
+        }
+
+        $amount = $this->get_amount($order->get_total());
+        $operation = array(
+            'token'                    => $this->get_api_client()->generate_hash($this->private_key, $order->get_id(), $amount, $order->get_currency()),
+            'shop_process_id'          => $order->get_id(),
+            'amount'                   => $amount,
+            'currency'                 => $order->get_currency(),
+            'description'              => $this->get_order_description($order),
+            'return_url'               => $this->get_order_return_url($order),
+            'cancel_url'               => $this->get_order_cancel_url(),
+            'extra_response_attributes'=> array('payment_card_type'),
+        );
+
+        $additional_data = $this->get_additional_data($order);
+        if ($additional_data !== '') {
+            $operation['additional_data'] = $additional_data;
+        }
+
+        if ($this->is_preauthorization_enabled()) {
+            $operation['preauthorization'] = 'S';
+            $order->update_meta_data('_bancard_is_preauthorization', 'yes');
+            $order->save();
+        }
+
+        $billing = $this->build_billing_data($order);
+        if ($billing) {
+            $operation['billing'] = $billing;
+        }
+
+        $response = $this->get_api_client()->request_single_buy($operation);
+        if (is_wp_error($response) || empty($response['status']) || $response['status'] !== 'success' || empty($response['process_id'])) {
+            $this->maybe_add_notice_from_response($response, __('No se pudo crear el pedido de pago en Bancard.', 'woocommerce-bancard'));
+            return array('result' => 'failure');
+        }
+
+        $this->store_process_meta($order, $response['process_id'], 'checkout');
+        $order->update_status('pending', __('Esperando confirmación de pago desde Bancard.', 'woocommerce-bancard'));
+
+        $redirect = $this->get_payment_page_url($response['process_id'], 'checkout', $order);
+        if ($redirect === '') {
+            wc_add_notice(__('No se encontró la página de pago embebida de Bancard.', 'woocommerce-bancard'), 'error');
+            return array('result' => 'failure');
+        }
+
+        return array(
+            'result'   => 'success',
+            'redirect' => $redirect,
+        );
+    }
+
+    public function check_response() {
+        $payload = json_decode(file_get_contents('php://input'), true);
+        $operation = isset($payload['operation']) && is_array($payload['operation']) ? $payload['operation'] : array();
+
+        if (empty($operation['shop_process_id'])) {
+            status_header(200);
+            wp_send_json(array('status' => 'ignored'));
+        }
+
+        $order = wc_get_order((int) $operation['shop_process_id']);
+        if (!$order) {
+            status_header(200);
+            wp_send_json(array('status' => 'order_not_found'));
+        }
+
+        $this->persist_confirmation_meta($order, $operation);
+
+        if ($this->is_successful_confirmation($operation)) {
+            if ($order->get_meta('_bancard_is_preauthorization', true) === 'yes') {
+                $this->mark_order_as_preauthorized($order, $operation, __('Preautorización aprobada por Bancard. Pendiente de confirmación final.', 'woocommerce-bancard'));
+            } else {
+                $this->mark_order_as_paid($order, $operation, sprintf(__('Pago confirmado por Bancard. Autorización %1$s, ticket %2$s.', 'woocommerce-bancard'), $operation['authorization_number'], $operation['ticket_number']));
+            }
+        } else {
+            $order->update_status('failed', $this->get_confirmation_error($operation));
+        }
+
+        status_header(200);
+        wp_send_json(array('status' => 'success'));
+    }
+
+    public function process_refund($order_id, $amount = null, $reason = '') {
+        $order = wc_get_order($order_id);
+        if (!$order) {
+            return new WP_Error('bancard_refund_order_missing', __('No se pudo recuperar la orden a revertir.', 'woocommerce-bancard'));
+        }
+
+        $order_total = (float) $order->get_total();
+        $requested_amount = $amount !== null ? (float) $amount : $order_total;
+
+        if (abs($requested_amount - $order_total) > 0.0001) {
+            return new WP_Error('bancard_refund_error', __('Bancard solo permite reversa total desde la API de este plugin.', 'woocommerce-bancard'));
+        }
+
+        $order_date = $order->get_date_created();
+        if ($order_date && $order_date->format('Y-m-d') !== wp_date('Y-m-d')) {
+            return new WP_Error('bancard_refund_error', __('La reversa por API solo está disponible el mismo día. Luego debe gestionarse desde el portal de comercios.', 'woocommerce-bancard'));
+        }
+
+        $operation = array(
+            'token'           => $this->get_api_client()->generate_hash($this->private_key, $order->get_id(), 'rollback', '0.00'),
+            'shop_process_id' => $order->get_id(),
+        );
+
+        $response = $this->get_api_client()->request_rollback($operation);
+        if (is_wp_error($response) || empty($response['status']) || $response['status'] !== 'success') {
+            return new WP_Error('bancard_refund_error', $this->get_api_client()->parse_error_message($response, __('La reversa fue rechazada por Bancard.', 'woocommerce-bancard')));
+        }
+
+        $order->add_order_note(__('Reversa solicitada correctamente a Bancard.', 'woocommerce-bancard'));
+        return true;
+    }
+
+    public function confirm_transaction($order_id) {
+        $order = wc_get_order($order_id);
+        if (!$order) {
+            return new WP_Error('bancard_confirmation_missing_order', __('No se encontró la orden a confirmar.', 'woocommerce-bancard'));
+        }
+
+        $operation = array(
+            'token'           => $this->get_api_client()->generate_hash($this->private_key, $order->get_id(), 'get_confirmation'),
+            'shop_process_id' => $order->get_id(),
+        );
+
+        $response = $this->get_api_client()->request_get_confirmation($operation);
+        if (is_wp_error($response) || empty($response['status'])) {
+            return new WP_Error('bancard_confirmation_error', $this->get_api_client()->parse_error_message($response, __('No fue posible consultar la confirmación en Bancard.', 'woocommerce-bancard')));
+        }
+
+        if ($response['status'] !== 'success' || empty($response['confirmation']) || !is_array($response['confirmation'])) {
+            return new WP_Error('bancard_confirmation_error', $this->get_api_client()->parse_error_message($response, __('Bancard no devolvió una confirmación válida.', 'woocommerce-bancard')));
+        }
+
+        $confirmation = $response['confirmation'];
+        if ($this->is_successful_confirmation($confirmation)) {
+            if ($order->get_meta('_bancard_is_preauthorization', true) === 'yes') {
+                $this->mark_order_as_preauthorized($order, $confirmation, __('Preautorización consultada y aprobada por Bancard.', 'woocommerce-bancard'));
+            } else {
+                $this->mark_order_as_paid($order, $confirmation, __('Transacción confirmada manualmente con Bancard.', 'woocommerce-bancard'));
+            }
+
+            return true;
+        }
+
+        $message = $this->get_confirmation_error($confirmation);
+        $order->update_status('failed', $message);
+        return new WP_Error('bancard_confirmation_error', $message);
+    }
+
+    public function confirm_preauthorization($order_id, $amount = null) {
+        $order = wc_get_order($order_id);
+        if (!$order) {
+            return new WP_Error('bancard_preauth_missing_order', __('No se encontró la orden de preautorización.', 'woocommerce-bancard'));
+        }
+
+        $operation = array(
+            'token'           => $this->get_api_client()->generate_hash($this->private_key, $order->get_id(), 'pre-authorization-confirm'),
+            'shop_process_id' => $order->get_id(),
+        );
+
+        if ($amount !== null) {
+            $operation['amount'] = $this->get_amount($amount);
+        }
+
+        $billing = $this->build_billing_data($order, true);
+        if ($billing) {
+            $operation['billing'] = $billing;
+        }
+
+        $response = $this->get_api_client()->request_preauthorization_confirm($operation);
+        if (is_wp_error($response) || empty($response['status']) || $response['status'] !== 'success' || empty($response['confirmation'])) {
+            return new WP_Error('bancard_preauth_error', $this->get_api_client()->parse_error_message($response, __('La confirmación de preautorización falló.', 'woocommerce-bancard')));
+        }
+
+        $confirmation = $response['confirmation'];
+        if (!$this->is_successful_confirmation($confirmation)) {
+            $message = $this->get_confirmation_error($confirmation);
+            $order->add_order_note(__('Bancard rechazó la confirmación de la preautorización: ', 'woocommerce-bancard') . $message);
+            return new WP_Error('bancard_preauth_error', $message);
+        }
+
+        $order->update_meta_data('_bancard_is_preauthorization', 'confirmed');
+        $order->save();
+        $this->mark_order_as_paid($order, $confirmation, __('Preautorización confirmada correctamente en Bancard.', 'woocommerce-bancard'));
+
+        return true;
+    }
+
+    public function get_client_info_by_ruc($client_ruc) {
+        $operation = array(
+            'token'      => $this->get_api_client()->generate_hash($this->private_key, 'billing_client_info'),
+            'client_ruc' => $client_ruc,
+        );
+
+        return $this->get_api_client()->request_billing_client_info($operation);
+    }
+
+    public function cancel_generated_invoice($order_id) {
+        $operation = array(
+            'token'           => $this->get_api_client()->generate_hash($this->private_key, $order_id, 'billing_cancel'),
+            'shop_process_id' => $order_id,
+        );
+
+        return $this->get_api_client()->request_billing_cancel($operation);
+    }
+
+    public function check_bancard_payment_page() {
+        if (!get_page_by_path('bancard-payment')) {
+            add_action('admin_notices', array($this, 'bancard_payment_page_missing_notice'));
         }
     }
 
-    /**
-     * Muestra una notificación de error en la sección de administración de WordPress
-     * si la página "bancard-payment" no existe.
-     *
-     * Esta función se encarga de mostrar una notificación de error en la sección de
-     * administración de WordPress si la página "bancard-payment" no existe. La notificación
-     * indica que la página es necesaria para que el plugin Bancard funcione correctamente.
-     *
-     * @since 1.0.0
-     */
-    function bancard_payment_page_missing_notice() {
+    public function bancard_payment_page_missing_notice() {
         ?>
         <div class="notice notice-error">
-            <p>
-                <?php esc_html(__('La página requerida "bancard-payment" no está creada. Por favor, crea una página con el slug "bancard-payment" para que el plugin Bancard funcione correctamente.', 'bancard')); ?>
-            </p>
+            <p><?php echo esc_html__('La página "bancard-payment" no existe. El plugin la necesita para renderizar los iframes de Bancard.', 'woocommerce-bancard'); ?></p>
         </div>
         <?php
     }
 
-    /**
-     * Inicializa los campos de configuración de la pasarela de pagos Bancard.
-     *
-     * Estos campos se utilizan para configurar la pasarela de pagos Bancard en la
-     * sección de administración de WordPress. Los campos se definen como un
-     * arreglo de arrays, cada uno de los cuales contiene los siguientes elementos:
-     *
-     * - `title`: El título del campo.
-     * - `type`: El tipo de campo (por ejemplo, `text`, `checkbox`, `select`).
-     * - `label`: La etiqueta del campo.
-     * - `description`: La descripción del campo.
-     * - `default`: El valor predeterminado del campo.
-     * - `desc_tip`: Un booleano que indica si se debe mostrar la descripción del
-     *              campo como un tooltip.
-     *
-     * @since 1.0.0
-     */
-    public function init_form_fields() {
-        $this->form_fields = array(
-            'enabled' => array(
-                'title' => 'Enable/Disable',
-                'type' => 'checkbox',
-                'label' => 'Habilitar la pasarela de pagos Bancard',
-                'default' => 'yes'
-            ),
-            'title' => array(
-                'title' => 'Título',
-                'type' => 'text',
-                'description' => __('This controls the title which the user sees during checkout.'),
-                'default' => 'Credit Card (Bancard)',
-                'desc_tip' => true,
-            ),
-            'description' => array(
-                'title' => 'Descripción',
-                'type' => 'textarea',
-                'description' => 'Este campo controla la descripción que ve el usuario en la página de compras',
-                'default' => 'Pagos con tarjetas vía Bancard',
-            ),
-            'public_key' => array(
-                'title' => 'Llave pública',
-                'type' => 'text'
-            ),
-            'private_key' => array(
-                'title' => 'Llave privada',
-                'type' => 'password'
-            ),
-            'environment' => array(
-                'title' => 'Servidor de pagos:',
-                'type' => 'select',
-                'options' => array(
-                    'production' => 'Producción',
-                    'staging' => 'Pruebas'
-                ),
-                'default' => 'staging'
-            )
-        );
-    }
-
-    /**
-     * Procesa el pago del pedido a través de la pasarela de pagos Bancard.
-     *
-     * @param int $order_id El ID del pedido a procesar.
-     *
-     * @return array Un array con la respuesta a la petición de pago.
-     *               Si la petición fue exitosa, devuelve un array con los elementos:
-     *               - 'result' => 'success'
-     *               - 'redirect' => La URL de la página de pago intermedia
-     *
-     *               Si la petición falló, devuelve un array con los elementos:
-     *               - 'result' => 'failure'
-     *               - 'redirect' => La URL de la página de compras
-     */
-    public function process_payment($order_id) {
-        $order = wc_get_order($order_id);
-        $process_id = get_post_meta($order_id, '_bancard_process_id', true);
-    
-        // Si ya existe un process_id, usamos el mismo
-        if (!$process_id) {
-            // Generar una solicitud a la API de Bancard para obtener el process_id
-            $endpoint = $this->environment == 'production' ? 'https://vpos.infonet.com.py' : 'https://vpos.infonet.com.py:8888';
-            $url = $endpoint . '/vpos/api/0.3/single_buy';
-            $amount = number_format($order->get_total(), 2, '.', '');
-            $currency = 'PYG';
-            $token = md5($this->private_key . $order_id . $amount . $currency);
-    
-            $data = array(
-                'public_key' => $this->public_key,
-                'operation' => array(
-                    'token' => $token,
-                    'shop_process_id' => $order_id,
-                    'amount' => number_format($order->get_total(), 2, '.', ''),
-                    'currency' => $currency,
-                    'description' => __('Pedido ID: ', 'bancard') . $order_id,
-                    'return_url' => $this->get_return_url($order),
-                    'cancel_url' => wc_get_cart_url(),
-                )
-            );
-    
-            $response = wp_remote_post($url, array(
-                'method' => 'POST',
-                'body' => json_encode($data),
-                'headers' => array('Content-Type' => 'application/json'),
-            ));
-    
-            if (is_wp_error($response)) {
-                wc_add_notice('Error al comunicarse con Bancard: ' . $response->get_error_message(), 'error');
-                return;
-            }
-    
-            $body = json_decode(wp_remote_retrieve_body($response), true);
-    
-            if ($body['status'] == 'success') {
-                $process_id = $body['process_id'];
-                update_post_meta($order_id, '_bancard_process_id', $process_id);
-            } else {
-                wc_add_notice('Error en la respuesta de Bancard: ' . $body['messages'][0]['dsc'], 'error');
-                wp_delete_post($order_id, true);
-                return;
-            }
-        }
-    
-        // Redirigir a la página intermedia con el process_id
-        $payment_page = get_page_by_path('bancard-payment');
-        if ($payment_page) {
-            $payment_page_url = add_query_arg('process_id', $process_id, get_permalink($payment_page->ID));
-            return array(
-                'result'   => 'success',
-                'redirect' => $payment_page_url,
-            );
-        } else {
-            wc_add_notice('No se encontró la página de pago de Bancard.', 'error');
-            return;
-        }
-    }
-
-    /**
-     * Crea una solicitud de pago a través de la API de Bancard.
-     *
-     * @param WC_Order $order La orden a procesar.
-     * @return array con los resultados de la solicitud. El array contiene dos claves:
-     *  - status: 'success' o 'fail' según el resultado de la solicitud.
-     *  - message: El mensaje de error en caso de que status sea 'fail'.
-     *  - process_id: El ID del proceso generado por Bancard en caso de que status sea 'success'.
-     */
-    private function create_payment($order) {
-        $endpoint = $this->environment == 'production' ? 'https://vpos.infonet.com.py' : 'https://vpos.infonet.com.py:8888';
-        $url = $endpoint . '/vpos/api/0.3/single_buy';
-
-        $shop_process_id = $order->get_id();
-        $amount = number_format($order->get_total(), 2, '.', '');
-        $currency = 'PYG';
-
-        $token = md5($this->private_key . $shop_process_id . $amount . $currency);
-
-        $body = json_encode(array(
-            'public_key' => $this->public_key,
-            'operation' => array(
-                'token' => $token,
-                'shop_process_id' => $shop_process_id,
-                'amount' => $amount,
-                'currency' => $currency,
-                'description' => 'Order ' . $shop_process_id,
-                'return_url' => $this->get_return_url($order),
-                'cancel_url' => wc_get_cart_url()
-            )
-        ));
-
-        $response = wp_remote_post($url, array(
-            'method' => 'POST',
-            'body' => $body,
-            'headers' => array('Content-Type' => 'application/json')
-        ));
-
-        if (is_wp_error($response)) {
-            return array('status' => 'fail', 'message' => $response->get_error_message());
-        }
-
-        $response_body = json_decode(wp_remote_retrieve_body($response), true);
-
-        if ($response_body['status'] == 'success') {
-            return array('status' => 'success', 'process_id' => $response_body['process_id']);
-        } else {
-            return array('status' => 'fail', 'message' => $response_body['message']);
-        }
-    }
-    /**
-     * Filter to locate the template for the payment page.
-     *
-     * Looks for a template file in the plugin directory and returns the path
-     * to the template file if it exists. Otherwise, returns the original
-     * template.
-     *
-     * @param string $template The original template path.
-     * @return string The path to the template file.
-     */
     public function bancard_payment_template($template) {
         if (is_page('bancard-payment')) {
             $plugin_template = plugin_dir_path(__FILE__) . '../templates/bancard-payment-page.php';
@@ -311,347 +278,50 @@ class WC_Gateway_Bancard extends WC_Payment_Gateway {
                 return $plugin_template;
             }
         }
+
         return $template;
     }
-    /**
-     * Process a subscription payment using the Bancard API.
-     *
-     * @param float $amount The amount to charge the customer.
-     * @param WC_Order $order The order being processed.
-     * @return boolean True if the payment was successful, false otherwise.
-     */
-    public function process_subscription_payment($amount, $order) {
-        $token = get_post_meta($order->get_id(), '_bancard_token', true);
-        $shop_process_id = $order->get_id();
-    
-        $endpoint = $this->environment == 'production' ? 'https://vpos.infonet.com.py' : 'https://vpos.infonet.com.py:8888';
-        $url = $endpoint . '/vpos/api/0.3/token_charge';
-    
-        $data = array(
-            'public_key' => $this->public_key,
-            'operation' => array(
-                'token' => $token,
-                'shop_process_id' => $shop_process_id,
-                'amount' => number_format($amount, 2, '.', ''),
-                'currency' => 'PYG',
-                'description' => 'Subscription payment for order ' . $shop_process_id,
-            )
-        );
-    
-        $response = wp_remote_post($url, array(
-            'method' => 'POST',
-            'body' => json_encode($data),
-            'headers' => array('Content-Type' => 'application/json'),
-        ));
-    
-        if (is_wp_error($response)) {
-            $order->update_status('failed', 'Subscription payment failed: ' . $response->get_error_message());
-            return false;
-        }
-    
-        $body = json_decode(wp_remote_retrieve_body($response), true);
-    
-        if ($body['status'] == 'success') {
-            $order->payment_complete();
-            $order->add_order_note('Subscription payment successful via Bancard.');
-            return true;
-        } else {
-            $order->update_status('failed', 'Subscription payment failed: ' . $body['message']);
-            return false;
-        }
-    }
-    
-    /**
-     * Maneja la respuesta de la API de Bancard para una transacción.
-     *
-     * Si la respuesta es exitosa, guarda los datos de autorización y ticket
-     * en los metadatos de la orden y completa el pago. Si la respuesta es
-     * fallida, actualiza el estado de la orden a 'failed' y envía un
-     * mensaje de error.
-     *
-     * @since 1.0.0
-     */
-    public function check_response() {
-        $response = json_decode(file_get_contents('php://input'), true);
-    
-        if (isset($response['operation']) && isset($response['operation']['shop_process_id'])) {
-            $order_id = $response['operation']['shop_process_id'];
-            $order = wc_get_order($order_id);
-            
-            if (!$order) {
-                exit(json_encode(['status' => 'payment_fail']));
-            }
-    
-            // Validación correcta: response = 'S' Y response_code = '00' Y authorization_number no sea null
-            if ($response['operation']['response'] == 'S' && 
-                $response['operation']['response_code'] == "00" &&
-                !empty($response['operation']['authorization_number'])) {
-                
-                // Guardar los datos de autorización y ticket en los metadatos de la orden
-                update_post_meta($order_id, '_bancard_authorization_number', $response['operation']['authorization_number']);
-                update_post_meta($order_id, '_bancard_ticket_number', $response['operation']['ticket_number']);
-    
-                $order->payment_complete();
-                $order->add_order_note(
-                    sprintf('Payment confirmed via Bancard. Authorization Number: %s, Ticket Number: %s', 
-                    $response['operation']['authorization_number'], 
-                    $response['operation']['ticket_number'])
-                );
-                wc_reduce_stock_levels($order_id);
-                header('Content-Type: application/json');
-                http_response_code(200);
-                exit(json_encode(['status' => 'success']));
-            } else {
-                // Manejar transacciones fallidas
-                $error_message = isset($response['operation']['response_description']) ? 
-                    $response['operation']['response_description'] : 'Payment failed';
-                
-                if (isset($response['operation']['extended_response_description'])) {
-                    $error_message .= ' - ' . $response['operation']['extended_response_description'];
-                }
-                
-                $order->update_status('failed', $error_message);
-                $order->add_order_note(
-                    sprintf('Payment failed via Bancard. Response Code: %s, Description: %s', 
-                    $response['operation']['response_code'], 
-                    $error_message)
-                );
-            }
-        }
-        
-        header('Content-Type: application/json');
-        http_response_code(200);
-        exit(json_encode(['status' => 'success']));
-    }
-    
-    /**
-     * Procesa un reembolso de una orden.
-     *
-     * Realiza una solicitud a la API de Bancard para reembolsar una orden.
-     * Si la respuesta es exitosa, agrega un nota a la orden con el mensaje
-     * "Refund processed via Bancard." y devuelve true. Si la respuesta es
-     * fallida, devuelve un objeto WP_Error con el mensaje de error.
-     *
-     * @since 1.0.0
-     *
-     * @param int $order_id ID de la orden a reembolsar.
-     * @param int $amount Monto del reembolso.
-     * @param string $reason Motivo del reembolso.
-     *
-     * @return bool|WP_Error True si el reembolso fue exitoso, WP_Error en caso de error.
-     */
-    public function process_refund($order_id, $amount = null, $reason = '') {
-        $order = wc_get_order($order_id);
-        $shop_process_id = $order->get_id();
 
-        // Validate amount, it should be exactly the same amount of the order and if not return an error
-        if ($amount != $order->get_total()) {
-            return new WP_Error('bancard_refund_error', 'El monto del reembolso debe ser exactamente el mismo que el monto de la orden.');
-        }
-
-        // Check if the order date is today and if not, return an error
-        $order_date = $order->get_date_created();
-        $today = new DateTime('now');
-        $today->setTime(0, 0, 0);
-        if ($order_date->format('Y-m-d') != $today->format('Y-m-d')) {
-            return new WP_Error('bancard_refund_error', 'El reembolso vía API de Bancard solo se puede realizar el mismo día de la orden. Para reversar este pedido hazlo por el canal oficial:
-            Portal de comercios -> soporte -> anulaciones');
-        }
-    
-        $endpoint = $this->environment == 'production' ? 'https://vpos.infonet.com.py' : 'https://vpos.infonet.com.py:8888';
-        $url = $endpoint . '/vpos/api/0.3/single_buy/rollback';
-    
-        $token = md5($this->private_key . $shop_process_id . "rollback0.00");
-    
-        $data = array(
-            'public_key' => $this->public_key,
-            'operation' => array(
-                'token' => $token,
-                'shop_process_id' => $shop_process_id,
-            )
-        );
-    
-        $response = wp_remote_post($url, array(
-            'method' => 'POST',
-            'body' => json_encode($data),
-            'headers' => array('Content-Type' => 'application/json'),
-        ));
-    
-        if (is_wp_error($response)) {
-            return new WP_Error('bancard_refund_error', 'Refund failed: ' . $response->get_error_message());
-        }
-    
-        $body = json_decode(wp_remote_retrieve_body($response), true);
-    
-        if ($body['status'] == 'success') {
-            $order->update_status('refunded', 'Reembolso procesado correctamente vía Bancard.');
-            $order->save();
-            return true;
-        } else {
-            return new WP_Error('bancard_refund_error', 'Reembolso no procesado: ' . $body['messages'][0]['dsc']);
-        }
-    }
-    
-    /**
-     * Shortcode para mostrar el formulario de pago de Bancard.
-     *
-     * @param array $atts Atributos del shortcode.
-     *
-     * @return string El HTML del formulario de pago.
-     */
     public function bancard_payment_shortcode($atts) {
-        error_log("<!-- Debug: Shortcode ejecutado -->");
+        ob_start();
         include plugin_dir_path(__FILE__) . '../templates/bancard-payment-page.php';
-        return '';
+        return ob_get_clean();
     }
 
-    /**
-     * Enqueue scripts and styles for the frontend.
-     *
-     * This function is hooked into `wp_enqueue_scripts` and is responsible for
-     * loading the necessary styles and scripts for the frontend.
-     */
-    function bancard_enqueue_scripts() {
-        // Cargar los scripts y estilos de WooCommerce
-        if (function_exists('is_woocommerce')) {
-            wp_enqueue_script('wc-checkout');
-            wp_enqueue_style('wc-checkout');
-        }
-    }
-
-    /**
-     * Confirma manualmente una transacci n de pago en la pasarela de pagos Bancard.
-     *
-     * Realiza una solicitud a la API de Bancard para confirmar la transacci n
-     * correspondiente al pedido especificado. Si la respuesta es exitosa, marca
-     * el pedido como completado y agrega una nota a la orden con el mensaje
-     * "Transaction confirmed manually via Bancard." y devuelve true. Si la
-     * respuesta es fallida, devuelve un objeto WP_Error con el mensaje de error.
-     *
-     * @param int $order_id El ID del pedido a confirmar.
-     *
-     * @return bool|WP_Error True si la confirmación fue exitosa, WP_Error en caso de error.
-     */
-    public function confirm_transaction($order_id) {
-        error_log("Confirmando transacción con order_id: {$order_id}");
+    public function display_bancard_transaction_details($order_id) {
         $order = wc_get_order($order_id);
-        $shop_process_id = $order->get_id();
-        
-        error_log("ID De transacción: {$shop_process_id}");
-    
-        $endpoint = $this->environment == 'production' ? 'https://vpos.infonet.com.py' : 'https://vpos.infonet.com.py:8888';
-        $url = $endpoint . '/vpos/api/0.3/single_buy/confirmations';
-    
-        $token = md5($this->private_key . $shop_process_id . "get_confirmation");
-    
-        $data = array(
-            'public_key' => $this->public_key,
-            'operation' => array(
-                'token' => $token,
-                'shop_process_id' => $shop_process_id,
-            )
-        );
-    
-        error_log("Iniciando llamada a wp_remote_post");
-        $response = wp_remote_post($url, array(
-            'method' => 'POST',
-            'body' => json_encode($data),
-            'headers' => array('Content-Type' => 'application/json'),
-        ));
-    
-        if (is_wp_error($response)) {
-            error_log("Error al obtener respuesta: {$response->get_error_message()}");
-            return new WP_Error('bancard_confirmation_error', 'Transaction confirmation failed: ' . $response->get_error_message());
+        if (!$order) {
+            return;
         }
-    
-        error_log("Decodificando JSON");
-        $body = json_decode(wp_remote_retrieve_body($response), true);
-    
-        // Verificar que la respuesta sea válida
-        if (!$body || !isset($body['status'])) {
-            error_log("Respuesta JSON inválida");
-            return new WP_Error('bancard_confirmation_error', 'Invalid JSON response from Bancard');
+
+        $authorization_number = $order->get_meta('_bancard_authorization_number', true);
+        $ticket_number = $order->get_meta('_bancard_ticket_number', true);
+        $response_code = $order->get_meta('_bancard_response_code', true);
+        $card_type = $order->get_meta('_bancard_payment_card_type', true);
+
+        if (!$authorization_number && !$ticket_number) {
+            return;
         }
-    
-        // Transacción exitosa
-        if ($body['status'] == 'success' && 
-            isset($body['confirmation']) &&
-            $body['confirmation']['response'] == 'S' && 
-            $body['confirmation']['response_code'] == '00' &&
-            !empty($body['confirmation']['authorization_number'])) {
-            
-            error_log("Transacción confirmada exitosamente");
-            
-            // Guardar datos de autorización si no existen
-            if (!get_post_meta($order_id, '_bancard_authorization_number', true)) {
-                update_post_meta($order_id, '_bancard_authorization_number', $body['confirmation']['authorization_number']);
-                update_post_meta($order_id, '_bancard_ticket_number', $body['confirmation']['ticket_number']);
-            }
-            
-            if ($order->get_status() != 'processing') {
-                error_log("Completando pago");
-                $order->payment_complete();
-            }
-            $order->add_order_note('Transacción Confirmada por Bancard el ' . current_datetime()->format('Y-m-d H:i:s'). '.');
-            return true;
+
+        echo '<section class="woocommerce-bancard-transaction">';
+        echo '<h2>' . esc_html__('Detalles de la transacción Bancard', 'woocommerce-bancard') . '</h2>';
+
+        if ($authorization_number) {
+            echo '<p><strong>' . esc_html__('Autorización VPOS:', 'woocommerce-bancard') . '</strong> ' . esc_html($authorization_number) . '</p>';
         }
-        // Error específico: PaymentNotFoundError
-        else if ($body['status'] == 'error' && 
-                 isset($body['messages']) && 
-                 is_array($body['messages']) && 
-                 !empty($body['messages']) &&
-                 $body['messages'][0]['key'] == 'PaymentNotFoundError') {
-            
-            error_log("PaymentNotFoundError");
-            $error_message = isset($body['messages'][0]['dsc']) ? $body['messages'][0]['dsc'] : 'Payment not found';
-            
-            // Cambiar estado y agregar nota privada
-            $order->update_status('failed', 'Transaction confirmation failed: Payment not found');
-            $order->add_order_note('Error de confirmación Bancard: ' . $error_message . ' - ' . current_datetime()->format('Y-m-d H:i:s'));
-            
-            return new WP_Error('bancard_confirmation_error', 'Transaction confirmation failed: ' . $error_message);
+
+        if ($ticket_number) {
+            echo '<p><strong>' . esc_html__('Ticket VPOS:', 'woocommerce-bancard') . '</strong> ' . esc_html($ticket_number) . '</p>';
         }
-        // Transacción denegada (response_code != 00)
-        else if ($body['status'] == 'success' && 
-                 isset($body['confirmation']) &&
-                 $body['confirmation']['response_code'] != '00') {
-            
-            error_log("Transacción denegada con código: " . $body['confirmation']['response_code']);
-            $error_message = isset($body['confirmation']['response_description']) ? 
-                $body['confirmation']['response_description'] : 'Transaction denied';
-            
-            if (isset($body['confirmation']['extended_response_description'])) {
-                $error_message .= ' - ' . $body['confirmation']['extended_response_description'];
-            }
-            
-            // Cambiar estado y agregar nota privada detallada
-            $order->update_status('failed', 'Transaction denied by Bancard');
-            $order->add_order_note(
-                sprintf('Pago denegado por Bancard - Código: %s, Descripción: %s - %s', 
-                    $body['confirmation']['response_code'], 
-                    $error_message,
-                    current_datetime()->format('Y-m-d H:i:s')
-                )
-            );
-            
-            return new WP_Error('bancard_confirmation_error', 'Transaction denied: ' . $error_message);
+
+        if ($response_code) {
+            echo '<p><strong>' . esc_html__('Código de respuesta:', 'woocommerce-bancard') . '</strong> ' . esc_html($response_code) . '</p>';
         }
-        // Otros errores
-        else {
-            error_log("Error desconocido: " . print_r($body, true));
-            $error_message = 'Unknown error';
-            
-            if (isset($body['messages']) && is_array($body['messages']) && !empty($body['messages'])) {
-                $error_message = isset($body['messages'][0]['dsc']) ? $body['messages'][0]['dsc'] : 'Unknown error';
-            }
-            
-            // Cambiar estado y agregar nota privada
-            $order->update_status('failed', 'Transaction confirmation failed');
-            $order->add_order_note('Error desconocido de confirmación Bancard: ' . $error_message . ' - ' . current_datetime()->format('Y-m-d H:i:s'));
-            
-            return new WP_Error('bancard_confirmation_error', 'Transaction confirmation failed: ' . $error_message);
+
+        if ($card_type) {
+            echo '<p><strong>' . esc_html__('Tipo de tarjeta:', 'woocommerce-bancard') . '</strong> ' . esc_html($card_type) . '</p>';
         }
+
+        echo '</section>';
     }
-    
 }
-?>

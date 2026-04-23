@@ -1,203 +1,111 @@
 <?php
 
-class WC_Gateway_Bancard_Zimple extends WC_Payment_Gateway {
-    public $public_key;
-    public $private_key;
-    public $environment;
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+class WC_Gateway_Bancard_Zimple extends WC_Gateway_Bancard_Base {
     public function __construct() {
-        $this->id = 'bancard_zimple';
-        $this->icon = plugins_url('assets/images/zimple.png', __DIR__);
-        $this->has_fields = false;
-        $this->method_title = 'Bancard Zimple';
-        $this->method_description = 'Pasarela de pagos Zimple para WooCommerce.';
+        $this->boot_gateway(
+            array(
+                'id'                 => 'bancard_zimple',
+                'icon'               => plugins_url('assets/images/zimple.png', __DIR__),
+                'has_fields'         => false,
+                'method_title'       => __('Billetera Zimple', 'woocommerce-bancard'),
+                'method_description' => __('Pagos embebidos con Zimple a través de Bancard.', 'woocommerce-bancard'),
+                'supports'           => array('products'),
+            )
+        );
 
-        // Load the settings.
-        $this->init_form_fields();
-        $this->init_settings();
-
-        // Define user set variables
-        $this->title = $this->get_option('title');
-        $this->description = $this->get_option('description');
-        $this->public_key = $this->get_option('public_key');
-        $this->private_key = $this->get_option('private_key');
-        $this->environment = $this->get_option('environment');
-
-        // Actions
-        add_action('woocommerce_receipt_' . $this->id, array($this, 'receipt_page'));
-        add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'process_admin_options'));
-
-        // Shortcode para la vista de pago
         add_shortcode('pago_bancard_zimple', array($this, 'bancard_zimple_payment_shortcode'));
     }
 
     public function init_form_fields() {
-        $this->form_fields = array(
-            'enabled' => array(
-                'title' => 'Enable/Disable',
-                'type' => 'checkbox',
-                'label' => 'Habilitar la pasarela de pagos Zimple',
-                'default' => 'yes'
-            ),
-            'title' => array(
-                'title' => 'Título',
-                'type' => 'text',
-                'description' => __('This controls the title which the user sees during checkout.'),
-                'default' => 'Billetera Zimple',
-                'desc_tip' => true,
-            ),
-            'description' => array(
-                'title' => 'Descripción',
-                'type' => 'textarea',
-                'description' => 'Este campo controla la descripción que ve el usuario en la página de compras',
-                'default' => 'Pagos con Billetera Zimple',
-            ),
-            'public_key' => array(
-                'title' => 'Llave pública',
-                'type' => 'text'
-            ),
-            'private_key' => array(
-                'title' => 'Llave privada',
-                'type' => 'password'
-            ),
-            'environment' => array(
-                'title' => 'Servidor de pagos:',
-                'type' => 'select',
-                'options' => array(
-                    'production' => 'Producción',
-                    'staging' => 'Pruebas'
+        $this->form_fields = $this->get_common_form_fields(
+            array(
+                'title' => array(
+                    'title'       => __('Título', 'woocommerce-bancard'),
+                    'type'        => 'text',
+                    'description' => __('Texto visible para el cliente durante el checkout.', 'woocommerce-bancard'),
+                    'default'     => __('Billetera Zimple', 'woocommerce-bancard'),
+                    'desc_tip'    => true,
                 ),
-                'default' => 'staging'
+                'description' => array(
+                    'title'       => __('Descripción', 'woocommerce-bancard'),
+                    'type'        => 'textarea',
+                    'description' => __('Descripción visible en el checkout.', 'woocommerce-bancard'),
+                    'default'     => __('Pagá con tu billetera Zimple.', 'woocommerce-bancard'),
+                ),
+                'enable_3ds' => array(
+                    'title'       => __('Secure3D', 'woocommerce-bancard'),
+                    'type'        => 'checkbox',
+                    'label'       => __('Sin efecto para Zimple', 'woocommerce-bancard'),
+                    'default'     => 'no',
+                    'description' => __('El flujo 3DS documentado aplica al charge con token.', 'woocommerce-bancard'),
+                ),
+                'default_installments' => array(
+                    'title'       => __('Cuotas por defecto', 'woocommerce-bancard'),
+                    'type'        => 'number',
+                    'description' => __('No aplica para Zimple.', 'woocommerce-bancard'),
+                    'default'     => 1,
+                    'custom_attributes' => array(
+                        'min'  => 1,
+                        'step' => 1,
+                    ),
+                ),
             )
         );
     }
 
-    function display_bancard_zimple_transaction_details($order_id) {
-        // Obtener los datos de la orden
-    }
-
     public function process_payment($order_id) {
         $order = wc_get_order($order_id);
-        $process_id = get_post_meta($order_id, '_bancard_process_id', true);
-
-        if (!$process_id) {
-            $result = $this->create_payment($order);
-            if ($result['status'] === 'success') {
-                $process_id = $result['process_id'];
-                update_post_meta($order_id, '_bancard_process_id', $process_id);
-            } else {
-                wc_add_notice('Error en la respuesta de Bancard: ' . $result['message'], 'error');
-                wp_delete_post($order_id, true);
-                return array('result' => 'failure', 'redirect' => wc_get_cart_url(), 'error' => $result['messages'][0]['dsc']);
-            }
-        }
-
-        $payment_page = get_page_by_path('bancard-payment');
-        if ($payment_page) {
-            $payment_page_url = add_query_arg(array(
-                'process_id' => $process_id,
-                'zimple' => 'true'
-            ), get_permalink($payment_page->ID));
-            return array(
-                'result'   => 'success',
-                'redirect' => $payment_page_url,
-            );    
-        } else {
-            wc_add_notice('No se encontró la página de pago de Bancard.', 'error');
+        if (!$order) {
+            wc_add_notice(__('No se pudo recuperar la orden para iniciar el pago.', 'woocommerce-bancard'), 'error');
             return array('result' => 'failure');
         }
-    }
 
-    private function create_payment($order) {
-        $endpoint = $this->environment == 'production' ? 'https://vpos.infonet.com.py' : 'https://vpos.infonet.com.py:8888';
-        $url = $endpoint . '/vpos/api/0.3/single_buy';
-    
-        $shop_process_id = $order->get_id();
-        $amount = number_format($order->get_total(), 2, '.', '');
-        $currency = 'PYG';
-    
-        // Obtener el teléfono del cliente
-        $billing_phone = $order->get_billing_phone();
-    
-        if (!$billing_phone) {
-            // Fallback si el número de teléfono no está disponible en la orden
-            $user_id = $order->get_user_id();
-            if ($user_id) {
-                $billing_phone = get_user_meta($user_id, 'billing_phone', true);
-            }
-        }
-    
-        if (!$billing_phone) {
-            // Si no hay un número de teléfono, lanzar un error en el frontend
-            wc_add_notice(__('Por favor, ingrese un número de teléfono válido para completar el pago.', 'woocommerce'), 'error');
+        $billing_phone = preg_replace('/\s+/', '', $order->get_billing_phone());
+        if ($billing_phone === '') {
+            wc_add_notice(__('Zimple requiere un teléfono celular válido en la facturación del pedido.', 'woocommerce-bancard'), 'error');
             return array('result' => 'failure');
         }
-    
-        $token = md5($this->private_key . $shop_process_id . $amount . $currency);
-    
-        $body = json_encode(array(
-            'public_key' => $this->public_key,
-            'operation' => array(
-                'token' => $token,
-                'shop_process_id' => $shop_process_id,
-                'amount' => $amount,
-                'currency' => $currency,
-                'additional_data' => $billing_phone, // Aquí va el número de teléfono del usuario
-                'description' => 'Order ' . $shop_process_id,
-                'return_url' => $this->get_return_url($order),
-                'cancel_url' => wc_get_cart_url(),
-                'zimple' => 'S' // Activar Zimple en el iframe
-            )
-        ));
-    
-        $response = wp_remote_post($url, array(
-            'method' => 'POST',
-            'body' => $body,
-            'headers' => array('Content-Type' => 'application/json')
-        ));
-    
-        if (is_wp_error($response)) {
-            return array('status' => 'fail', 'message' => $response->get_error_message());
+
+        $amount = $this->get_amount($order->get_total());
+        $operation = array(
+            'token'           => $this->get_api_client()->generate_hash($this->private_key, $order->get_id(), $amount, $order->get_currency()),
+            'shop_process_id' => $order->get_id(),
+            'amount'          => $amount,
+            'currency'        => $order->get_currency(),
+            'additional_data' => mb_substr($billing_phone, 0, 255),
+            'description'     => $this->get_order_description($order),
+            'return_url'      => $this->get_order_return_url($order),
+            'cancel_url'      => $this->get_order_cancel_url(),
+            'zimple'          => 'S',
+        );
+
+        $billing = $this->build_billing_data($order);
+        if ($billing) {
+            $operation['billing'] = $billing;
         }
-    
-        $response_body = json_decode(wp_remote_retrieve_body($response), true);
-    
-        if ($response_body['status'] == 'success') {
-            return array('status' => 'success', 'process_id' => $response_body['process_id']);
-        } else {
-            return array('status' => 'fail', 'message' => $response_body['messages'][0]['dsc']);
+
+        $response = $this->get_api_client()->request_single_buy($operation);
+        if (is_wp_error($response) || empty($response['status']) || $response['status'] !== 'success' || empty($response['process_id'])) {
+            $this->maybe_add_notice_from_response($response, __('No se pudo crear el pedido de pago Zimple.', 'woocommerce-bancard'));
+            return array('result' => 'failure');
         }
+
+        $this->store_process_meta($order, $response['process_id'], 'zimple');
+        $order->update_status('pending', __('Esperando confirmación de pago desde Zimple/Bancard.', 'woocommerce-bancard'));
+
+        return array(
+            'result'   => 'success',
+            'redirect' => $this->get_payment_page_url($response['process_id'], 'zimple', $order),
+        );
     }
 
-    public function check_response() {
-        $response = json_decode(file_get_contents('php://input'), true);
-    
-        if (isset($response['operation']) && isset($response['operation']['shop_process_id'])) {
-            $order_id = $response['operation']['shop_process_id'];
-            $order = wc_get_order($order_id);
-    
-            if ($response['operation']['response'] == 'S') {
-                // Guardar los datos de autorización y ticket en los metadatos de la orden
-                update_post_meta($order_id, '_bancard_authorization_number', $response['operation']['authorization_number']);
-                update_post_meta($order_id, '_bancard_ticket_number', $response['operation']['ticket_number']);
-    
-                $order->payment_complete();
-                $order->add_order_note(
-                    sprintf('Payment confirmed via Bancard. Authorization Number: %s, Ticket Number: %s', 
-                    $response['operation']['authorization_number'], 
-                    $response['operation']['ticket_number'])
-                );
-                wc_reduce_stock_levels($order_id);
-                exit(json_encode(['status' => 'success']));
-            } else {
-                $order->update_status('failed', 'Payment failed: ' . $response['message']);
-            }
-        }
-    
-        http_response_code(400);
-        exit(json_encode(['status' => 'payment_fail']));
+    public function bancard_zimple_payment_shortcode($atts) {
+        ob_start();
+        include plugin_dir_path(__FILE__) . '../templates/bancard-payment-page.php';
+        return ob_get_clean();
     }
-    
-    // El resto de métodos, como check_response, bancard_zimple_payment_template, etc., serían similares a los ya implementados para el gateway de Bancard regular.
-
 }
-?>
