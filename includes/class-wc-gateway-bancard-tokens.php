@@ -13,13 +13,30 @@ class WC_Gateway_Bancard_Tokens extends WC_Gateway_Bancard_Base {
                 'has_fields'         => true,
                 'method_title'       => __('Bancard Tokens', 'woocommerce-bancard'),
                 'method_description' => __('Pagos con tarjetas catastradas en Bancard.', 'woocommerce-bancard'),
-                'supports'           => array('products', 'refunds', 'subscriptions', 'tokenization', 'add_payment_method'),
+                'supports'           => array(
+                    'products',
+                    'refunds',
+                    'subscriptions',
+                    'subscription_cancellation',
+                    'subscription_reactivation',
+                    'subscription_suspension',
+                    'subscription_amount_changes',
+                    'subscription_date_changes',
+                    'subscription_payment_method_change',
+                    'subscription_payment_method_change_customer',
+                    'subscription_payment_method_change_admin',
+                    'multiple_subscriptions',
+                    'tokenization',
+                    'add_payment_method',
+                ),
             )
         );
 
-        if (class_exists('WC_Subscriptions_Order')) {
-            add_action('woocommerce_scheduled_subscription_payment_' . $this->id, array($this, 'process_subscription_payment'), 10, 2);
-        }
+        add_action('woocommerce_scheduled_subscription_payment_' . $this->id, array($this, 'process_subscription_payment'), 10, 2);
+        add_action('woocommerce_subscriptions_changed_failing_payment_method_' . $this->id, array($this, 'update_failing_payment_method'), 10, 2);
+        add_filter('woocommerce_subscription_payment_meta', array($this, 'add_subscription_payment_meta'), 10, 2);
+        add_action('woocommerce_subscription_validate_payment_meta', array($this, 'validate_subscription_payment_meta'), 10, 2);
+        add_action('woocommerce_payment_complete', array($this, 'maybe_sync_recurring_payment_method_from_paid_order'), 20);
     }
 
     public function init_form_fields() {
@@ -231,6 +248,16 @@ class WC_Gateway_Bancard_Tokens extends WC_Gateway_Bancard_Base {
         $order->update_meta_data('_bancard_alias_token', $alias_token);
         $order->save();
 
+        if ($this->is_subscription_change_request($order_id, $order)) {
+            $this->persist_recurring_payment_method_for_object($order, $alias_token);
+            $order->add_order_note(__('M&eacute;todo de pago recurrente actualizado en Bancard.', 'woocommerce-bancard'));
+
+            return array(
+                'result'   => 'success',
+                'redirect' => $this->get_return_url($order),
+            );
+        }
+
         $response = $this->get_api_client()->request_charge($operation);
         if (is_wp_error($response)) {
             wc_add_notice($response->get_error_message(), 'error');
@@ -268,6 +295,8 @@ class WC_Gateway_Bancard_Tokens extends WC_Gateway_Bancard_Base {
                 }
                 $this->mark_order_as_paid($order, $operation_response, $note);
             }
+
+            $this->persist_recurring_payment_method_from_order($order, $alias_token, $operation_response);
 
             return array(
                 'result'   => 'success',
@@ -385,11 +414,19 @@ class WC_Gateway_Bancard_Tokens extends WC_Gateway_Bancard_Base {
     }
 
     public function process_subscription_payment($amount, $order) {
-        $alias_token = $order->get_meta('_bancard_alias_token', true);
-        if ($alias_token === '') {
-            $order->update_status('failed', __('No se encontró alias token Bancard para el cobro recurrente.', 'woocommerce-bancard'));
+        $order = wc_get_order($order);
+        if (!$order) {
             return false;
         }
+
+        $alias_token = $this->get_recurring_alias_token($order);
+        if ($alias_token === '') {
+            $this->mark_subscription_payment_failed($order, __('No se encontr&oacute; alias token Bancard para el cobro recurrente.', 'woocommerce-bancard'));
+            return false;
+        }
+
+        $order->update_meta_data('_bancard_alias_token', $alias_token);
+        $order->save();
 
         $operation = array(
             'token'                    => $this->get_api_client()->generate_hash($this->private_key, $order->get_id(), 'charge', $this->get_amount($amount), $order->get_currency(), $alias_token),
@@ -405,7 +442,15 @@ class WC_Gateway_Bancard_Tokens extends WC_Gateway_Bancard_Base {
 
         $response = $this->get_api_client()->request_charge($operation);
         if (is_wp_error($response)) {
-            $order->update_status('failed', $response->get_error_message());
+            $this->mark_subscription_payment_failed($order, $response->get_error_message());
+            return false;
+        }
+
+        if (!empty($response['status']) && $response['status'] === 'error') {
+            $this->mark_subscription_payment_failed(
+                $order,
+                $this->get_api_client()->parse_error_message($response, __('Bancard rechaz&oacute; el cobro recurrente.', 'woocommerce-bancard'))
+            );
             return false;
         }
 
@@ -417,11 +462,94 @@ class WC_Gateway_Bancard_Tokens extends WC_Gateway_Bancard_Base {
                 $note .= ' ' . sprintf(__('Tipo de tarjeta: %s.', 'woocommerce-bancard'), $card_type_label);
             }
             $this->mark_order_as_paid($order, $operation_response, $note);
+            $this->persist_recurring_payment_method_from_order($order, $alias_token, $operation_response);
             return true;
         }
 
-        $order->update_status('failed', $this->get_confirmation_error($operation_response));
+        $this->mark_subscription_payment_failed($order, $this->get_confirmation_error($operation_response));
         return false;
+    }
+
+    public function add_subscription_payment_meta($payment_meta, $subscription) {
+        if (!is_object($subscription) || !method_exists($subscription, 'get_meta')) {
+            return $payment_meta;
+        }
+
+        $payment_meta[$this->id] = array(
+            'post_meta' => array(
+                '_bancard_alias_token' => array(
+                    'value' => $subscription->get_meta('_bancard_alias_token', true),
+                    'label' => __('Alias token Bancard', 'woocommerce-bancard'),
+                ),
+                '_bancard_payment_card_type' => array(
+                    'value' => $subscription->get_meta('_bancard_payment_card_type', true),
+                    'label' => __('Tipo de tarjeta Bancard', 'woocommerce-bancard'),
+                ),
+            ),
+        );
+
+        return $payment_meta;
+    }
+
+    public function validate_subscription_payment_meta($payment_method_id, $payment_meta) {
+        if ($payment_method_id !== $this->id) {
+            return;
+        }
+
+        $alias_token = '';
+        if (!empty($payment_meta['post_meta']['_bancard_alias_token']['value'])) {
+            $alias_token = trim((string) $payment_meta['post_meta']['_bancard_alias_token']['value']);
+        }
+
+        if ($alias_token === '') {
+            throw new Exception(__('El alias token de Bancard es obligatorio para renovar autom&aacute;ticamente.', 'woocommerce-bancard'));
+        }
+    }
+
+    public function update_failing_payment_method($original_order, $renewal_order) {
+        $renewal_order = wc_get_order($renewal_order);
+        if (!$renewal_order) {
+            return;
+        }
+
+        $alias_token = $this->get_recurring_alias_token($renewal_order);
+        if ($alias_token === '') {
+            return;
+        }
+
+        $confirmation = array();
+        $payment_card_type = $renewal_order->get_meta('_bancard_payment_card_type', true);
+        if ($payment_card_type !== '') {
+            $confirmation['payment_card_type'] = $payment_card_type;
+        }
+
+        $original_order = wc_get_order($original_order);
+        if ($original_order) {
+            $this->persist_recurring_payment_method_from_order($original_order, $alias_token, $confirmation);
+            $original_order->add_order_note(__('Bancard actualiz&oacute; el token recurrente luego de un pago de renovaci&oacute;n recuperado.', 'woocommerce-bancard'));
+        }
+
+        $this->persist_recurring_payment_method_from_order($renewal_order, $alias_token, $confirmation);
+    }
+
+    public function maybe_sync_recurring_payment_method_from_paid_order($order_id) {
+        $order = wc_get_order($order_id);
+        if (!$order || $order->get_payment_method() !== $this->id) {
+            return;
+        }
+
+        $alias_token = $this->get_recurring_alias_token($order);
+        if ($alias_token === '') {
+            return;
+        }
+
+        $confirmation = array();
+        $payment_card_type = $order->get_meta('_bancard_payment_card_type', true);
+        if ($payment_card_type !== '') {
+            $confirmation['payment_card_type'] = $payment_card_type;
+        }
+
+        $this->persist_recurring_payment_method_from_order($order, $alias_token, $confirmation);
     }
 
     protected function normalize_card_brand($brand) {
@@ -487,6 +615,139 @@ class WC_Gateway_Bancard_Tokens extends WC_Gateway_Bancard_Base {
         $token->save();
     }
 
+    protected function is_subscription_change_request($order_id, $order) {
+        if (!function_exists('wcs_is_subscription')) {
+            return false;
+        }
+
+        return wcs_is_subscription($order_id) || (is_object($order) && method_exists($order, 'get_type') && $order->get_type() === 'shop_subscription');
+    }
+
+    protected function get_related_subscriptions($order) {
+        if (!function_exists('wcs_get_subscriptions_for_order')) {
+            return array();
+        }
+
+        $subscriptions = wcs_get_subscriptions_for_order(
+            $order,
+            array(
+                'order_type' => array('parent', 'renewal', 'switch', 'resubscribe'),
+            )
+        );
+
+        return is_array($subscriptions) ? $subscriptions : array();
+    }
+
+    protected function get_recurring_alias_token($order) {
+        $order = wc_get_order($order);
+        if (!$order) {
+            return '';
+        }
+
+        $candidates = array(
+            $order->get_meta('_bancard_alias_token', true),
+        );
+
+        foreach ($this->get_related_subscriptions($order) as $subscription) {
+            if (is_object($subscription) && method_exists($subscription, 'get_meta')) {
+                $candidates[] = $subscription->get_meta('_bancard_alias_token', true);
+            }
+        }
+
+        if (method_exists($order, 'get_parent_id') && $order->get_parent_id()) {
+            $parent_order = wc_get_order($order->get_parent_id());
+            if ($parent_order) {
+                $candidates[] = $parent_order->get_meta('_bancard_alias_token', true);
+            }
+        }
+
+        foreach ($candidates as $candidate) {
+            if (is_string($candidate) && trim($candidate) !== '') {
+                return trim($candidate);
+            }
+        }
+
+        return '';
+    }
+
+    protected function persist_recurring_payment_method_from_order(WC_Order $order, $alias_token, array $confirmation = array()) {
+        if ($alias_token === '') {
+            return;
+        }
+
+        $user_id = (int) $order->get_user_id();
+        $payment_token = $this->find_payment_token_by_alias($user_id, $alias_token);
+
+        $order->update_meta_data('_bancard_alias_token', $alias_token);
+        if (!empty($confirmation['payment_card_type'])) {
+            $order->update_meta_data('_bancard_payment_card_type', $confirmation['payment_card_type']);
+        }
+
+        if ($payment_token && method_exists($order, 'add_payment_token')) {
+            $order->add_payment_token($payment_token);
+        }
+
+        $order->save();
+
+        foreach ($this->get_related_subscriptions($order) as $subscription) {
+            $this->persist_recurring_payment_method_for_object($subscription, $alias_token, $confirmation, $payment_token);
+        }
+    }
+
+    protected function persist_recurring_payment_method_for_object($subscription, $alias_token, array $confirmation = array(), $payment_token = null) {
+        if (!is_object($subscription) || !method_exists($subscription, 'update_meta_data') || $alias_token === '') {
+            return;
+        }
+
+        $subscription->update_meta_data('_bancard_alias_token', $alias_token);
+
+        if (!empty($confirmation['payment_card_type'])) {
+            $subscription->update_meta_data('_bancard_payment_card_type', $confirmation['payment_card_type']);
+        }
+
+        if (method_exists($subscription, 'set_payment_method')) {
+            $subscription->set_payment_method($this);
+        }
+
+        if (method_exists($subscription, 'set_requires_manual_renewal')) {
+            $subscription->set_requires_manual_renewal(false);
+        }
+
+        if (!$payment_token && method_exists($subscription, 'get_user_id')) {
+            $payment_token = $this->find_payment_token_by_alias((int) $subscription->get_user_id(), $alias_token);
+        }
+
+        if ($payment_token && method_exists($subscription, 'add_payment_token')) {
+            $subscription->add_payment_token($payment_token);
+        }
+
+        if (method_exists($subscription, 'save')) {
+            $subscription->save();
+        }
+    }
+
+    protected function find_payment_token_by_alias($user_id, $alias_token) {
+        if (!$user_id || $alias_token === '') {
+            return null;
+        }
+
+        foreach (WC_Payment_Tokens::get_customer_tokens($user_id, $this->id) as $token) {
+            if ($token->get_token() === $alias_token) {
+                return $token;
+            }
+        }
+
+        return null;
+    }
+
+    protected function mark_subscription_payment_failed(WC_Order $order, $message) {
+        if (class_exists('WC_Subscriptions_Manager') && method_exists('WC_Subscriptions_Manager', 'process_subscription_payment_failure_on_order')) {
+            WC_Subscriptions_Manager::process_subscription_payment_failure_on_order($order);
+        }
+
+        $order->update_status('failed', $message);
+    }
+
     protected function render_add_payment_method_fields() {
         $user_id = get_current_user_id();
         if (!$user_id) {
@@ -499,7 +760,6 @@ class WC_Gateway_Bancard_Tokens extends WC_Gateway_Bancard_Base {
         $process_id = isset($_GET['bancard_process_id']) ? sanitize_text_field(wp_unslash($_GET['bancard_process_id'])) : '';
         $action = isset($_GET['bancard_action']) ? sanitize_text_field(wp_unslash($_GET['bancard_action'])) : '';
 
-        // JS helper: mueve #bancard-result-message fuera del form y oculta el form.
         $move_out_js = "<script>
 (function () {
     var form = document.getElementById('add_payment_method');
@@ -545,20 +805,13 @@ class WC_Gateway_Bancard_Tokens extends WC_Gateway_Bancard_Base {
 
             echo '<div id="bancard-token-form"><p>' . esc_html__('Cargando formulario de registro de tarjeta...', 'woocommerce-bancard') . '</p></div>';
 
-            // Creamos el script de Bancard dinámicamente y usamos onload para
-            // garantizar que Bancard esté disponible ANTES de llamar createForm
-            // (evita el race condition con scripts inline que se ejecutan antes
-            // de que el script externo termine de parsear).
             echo "<script>
 (function () {
     function initBancardForm() {
-        // Suprimir el notice prematuro de WooCommerce.
         document.querySelectorAll(
             '.woocommerce-message, .wc-block-components-notice-banner--success'
         ).forEach(function (el) { el.style.display = 'none'; });
 
-        // Mover el contenedor FUERA del form antes de ocultarlo para que
-        // el iframe de Bancard no quede arrastrado por el display:none del form.
         var form      = document.getElementById('add_payment_method');
         var container = document.getElementById('bancard-token-form');
         if (form && container) {
