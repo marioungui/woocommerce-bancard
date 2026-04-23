@@ -316,6 +316,13 @@ abstract class WC_Gateway_Bancard_Base extends WC_Payment_Gateway {
     }
 
     protected function persist_confirmation_meta(WC_Order $order, array $confirmation) {
+        $payment_card_type = '';
+        if (!empty($confirmation['payment_card_type'])) {
+            $payment_card_type = (string) $confirmation['payment_card_type'];
+        } elseif (!empty($confirmation['extra_attributes']) && is_array($confirmation['extra_attributes']) && !empty($confirmation['extra_attributes']['payment_card_type'])) {
+            $payment_card_type = (string) $confirmation['extra_attributes']['payment_card_type'];
+        }
+
         $map = array(
             '_bancard_authorization_number'         => 'authorization_number',
             '_bancard_ticket_number'                => 'ticket_number',
@@ -335,8 +342,8 @@ abstract class WC_Gateway_Bancard_Base extends WC_Payment_Gateway {
             }
         }
 
-        if (!empty($confirmation['payment_card_type'])) {
-            $order->update_meta_data('_bancard_payment_card_type', $confirmation['payment_card_type']);
+        if ($payment_card_type !== '') {
+            $order->update_meta_data('_bancard_payment_card_type', $payment_card_type);
         }
 
         if (!empty($confirmation['billing_response'])) {
@@ -377,6 +384,28 @@ abstract class WC_Gateway_Bancard_Base extends WC_Payment_Gateway {
         }
 
         return $message;
+    }
+
+    protected function get_human_payment_card_type(array $confirmation) {
+        $payment_card_type = '';
+
+        if (!empty($confirmation['payment_card_type'])) {
+            $payment_card_type = strtolower((string) $confirmation['payment_card_type']);
+        } elseif (!empty($confirmation['extra_attributes']) && is_array($confirmation['extra_attributes']) && !empty($confirmation['extra_attributes']['payment_card_type'])) {
+            $payment_card_type = strtolower((string) $confirmation['extra_attributes']['payment_card_type']);
+        } else {
+            $payment_card_type = strtolower((string) $confirmation['card_type']);
+        }
+
+        if ($payment_card_type === 'credit') {
+            return __('crédito', 'woocommerce-bancard');
+        }
+
+        if ($payment_card_type === 'debit') {
+            return __('débito', 'woocommerce-bancard');
+        }
+
+        return '';
     }
 
     protected function mark_order_as_preauthorized(WC_Order $order, array $confirmation, $context_note) {

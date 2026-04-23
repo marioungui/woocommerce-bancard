@@ -119,10 +119,19 @@ class WC_Gateway_Bancard extends WC_Gateway_Bancard_Base {
         $this->persist_confirmation_meta($order, $operation);
 
         if ($this->is_successful_confirmation($operation)) {
+            $card_type_label = $this->get_human_payment_card_type($operation);
             if ($order->get_meta('_bancard_is_preauthorization', true) === 'yes') {
-                $this->mark_order_as_preauthorized($order, $operation, __('Preautorización aprobada por Bancard. Pendiente de confirmación final.', 'woocommerce-bancard'));
+                $note = __('Preautorización aprobada por Bancard. Pendiente de confirmación final.', 'woocommerce-bancard');
+                if ($card_type_label !== '') {
+                    $note .= ' ' . sprintf(__('Tipo de tarjeta: %s.', 'woocommerce-bancard'), $card_type_label);
+                }
+                $this->mark_order_as_preauthorized($order, $operation, $note);
             } else {
-                $this->mark_order_as_paid($order, $operation, sprintf(__('Pago confirmado por Bancard. Autorización %1$s, ticket %2$s.', 'woocommerce-bancard'), $operation['authorization_number'], $operation['ticket_number']));
+                $note = sprintf(__('Pago confirmado por Bancard. Autorización %1$s, ticket %2$s.', 'woocommerce-bancard'), $operation['authorization_number'], $operation['ticket_number']);
+                if ($card_type_label !== '') {
+                    $note .= ' ' . sprintf(__('Tipo de tarjeta: %s.', 'woocommerce-bancard'), $card_type_label);
+                }
+                $this->mark_order_as_paid($order, $operation, $note);
             }
         } else {
             $order->update_status('failed', $this->get_confirmation_error($operation));
@@ -186,10 +195,19 @@ class WC_Gateway_Bancard extends WC_Gateway_Bancard_Base {
 
         $confirmation = $response['confirmation'];
         if ($this->is_successful_confirmation($confirmation)) {
+            $card_type_label = $this->get_human_payment_card_type($confirmation);
             if ($order->get_meta('_bancard_is_preauthorization', true) === 'yes') {
-                $this->mark_order_as_preauthorized($order, $confirmation, __('Preautorización consultada y aprobada por Bancard.', 'woocommerce-bancard'));
+                $note = __('Preautorización consultada y aprobada por Bancard.', 'woocommerce-bancard');
+                if ($card_type_label !== '') {
+                    $note .= ' ' . sprintf(__('Tipo de tarjeta: %s.', 'woocommerce-bancard'), $card_type_label);
+                }
+                $this->mark_order_as_preauthorized($order, $confirmation, $note);
             } else {
-                $this->mark_order_as_paid($order, $confirmation, __('Transacción confirmada manualmente con Bancard.', 'woocommerce-bancard'));
+                $note = __('Transacción confirmada manualmente con Bancard.', 'woocommerce-bancard');
+                if ($card_type_label !== '') {
+                    $note .= ' ' . sprintf(__('Tipo de tarjeta: %s.', 'woocommerce-bancard'), $card_type_label);
+                }
+                $this->mark_order_as_paid($order, $confirmation, $note);
             }
 
             return true;
@@ -234,7 +252,12 @@ class WC_Gateway_Bancard extends WC_Gateway_Bancard_Base {
 
         $order->update_meta_data('_bancard_is_preauthorization', 'confirmed');
         $order->save();
-        $this->mark_order_as_paid($order, $confirmation, __('Preautorización confirmada correctamente en Bancard.', 'woocommerce-bancard'));
+        $note = __('Preautorización confirmada correctamente en Bancard.', 'woocommerce-bancard');
+        $card_type_label = $this->get_human_payment_card_type($confirmation);
+        if ($card_type_label !== '') {
+            $note .= ' ' . sprintf(__('Tipo de tarjeta: %s.', 'woocommerce-bancard'), $card_type_label);
+        }
+        $this->mark_order_as_paid($order, $confirmation, $note);
 
         return true;
     }

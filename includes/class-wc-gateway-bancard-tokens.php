@@ -254,10 +254,19 @@ class WC_Gateway_Bancard_Tokens extends WC_Gateway_Bancard_Base {
         }
 
         if ($this->is_successful_confirmation($operation_response)) {
+            $card_type_label = $this->get_human_payment_card_type($operation_response);
             if ($order->get_meta('_bancard_is_preauthorization', true) === 'yes') {
-                $this->mark_order_as_preauthorized($order, $operation_response, __('Preautorización con token aprobada por Bancard.', 'woocommerce-bancard'));
+                $note = __('Preautorización con token aprobada por Bancard.', 'woocommerce-bancard');
+                if ($card_type_label !== '') {
+                    $note .= ' ' . sprintf(__('Tipo de tarjeta: %s.', 'woocommerce-bancard'), $card_type_label);
+                }
+                $this->mark_order_as_preauthorized($order, $operation_response, $note);
             } else {
-                $this->mark_order_as_paid($order, $operation_response, __('Pago con token aprobado por Bancard.', 'woocommerce-bancard'));
+                $note = __('Pago con token aprobado por Bancard.', 'woocommerce-bancard');
+                if ($card_type_label !== '') {
+                    $note .= ' ' . sprintf(__('Tipo de tarjeta: %s.', 'woocommerce-bancard'), $card_type_label);
+                }
+                $this->mark_order_as_paid($order, $operation_response, $note);
             }
 
             return array(
@@ -402,7 +411,12 @@ class WC_Gateway_Bancard_Tokens extends WC_Gateway_Bancard_Base {
 
         $operation_response = isset($response['operation']) && is_array($response['operation']) ? $response['operation'] : array();
         if ($this->is_successful_confirmation($operation_response)) {
-            $this->mark_order_as_paid($order, $operation_response, __('Cobro recurrente procesado correctamente por Bancard.', 'woocommerce-bancard'));
+            $note = __('Cobro recurrente procesado correctamente por Bancard.', 'woocommerce-bancard');
+            $card_type_label = $this->get_human_payment_card_type($operation_response);
+            if ($card_type_label !== '') {
+                $note .= ' ' . sprintf(__('Tipo de tarjeta: %s.', 'woocommerce-bancard'), $card_type_label);
+            }
+            $this->mark_order_as_paid($order, $operation_response, $note);
             return true;
         }
 
