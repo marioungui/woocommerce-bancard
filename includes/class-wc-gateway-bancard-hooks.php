@@ -48,11 +48,6 @@ function bancard_payment_methods_content() {
 }
 add_action('woocommerce_account_payment-methods_endpoint', 'bancard_payment_methods_content');
 
-function bancard_add_payment_method_content() {
-    $tokens = new WC_Gateway_Bancard_Tokens();
-    $tokens->add_payment_method();
-}
-add_action('woocommerce_account_add-payment-method_endpoint', 'bancard_add_payment_method_content');
 
 function bancard_order_actions($actions) {
     global $theorder;

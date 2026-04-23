@@ -13,7 +13,7 @@ class WC_Gateway_Bancard_Tokens extends WC_Gateway_Bancard_Base {
                 'has_fields'         => true,
                 'method_title'       => __('Bancard Tokens', 'woocommerce-bancard'),
                 'method_description' => __('Pagos con tarjetas catastradas en Bancard.', 'woocommerce-bancard'),
-                'supports'           => array('products', 'refunds', 'subscriptions', 'tokenization'),
+                'supports'           => array('products', 'refunds', 'subscriptions', 'tokenization', 'add_payment_method'),
             )
         );
 
@@ -43,6 +43,11 @@ class WC_Gateway_Bancard_Tokens extends WC_Gateway_Bancard_Base {
     }
 
     public function payment_fields() {
+        if (function_exists('is_add_payment_method_page') && is_add_payment_method_page()) {
+            $this->render_add_payment_method_fields();
+            return;
+        }
+
         $cards_response = $this->get_user_cards(get_current_user_id());
         if (is_wp_error($cards_response)) {
             wc_print_notice($cards_response->get_error_message(), 'error');
@@ -94,6 +99,10 @@ class WC_Gateway_Bancard_Tokens extends WC_Gateway_Bancard_Base {
     }
 
     public function validate_fields() {
+        if (function_exists('is_add_payment_method_page') && is_add_payment_method_page()) {
+            return $this->validate_add_payment_method_request();
+        }
+
         if (empty($_POST['bancard_card_token'])) {
             wc_add_notice(__('Seleccioná una tarjeta para continuar.', 'woocommerce-bancard'), 'error');
             return false;
@@ -105,6 +114,74 @@ class WC_Gateway_Bancard_Tokens extends WC_Gateway_Bancard_Base {
         }
 
         return true;
+    }
+
+    public function add_payment_method() {
+        $user_id = get_current_user_id();
+        if (!$user_id) {
+            return array(
+                'result'   => 'failure',
+                'redirect' => wc_get_page_permalink('myaccount'),
+            );
+        }
+
+        $existing_cards = $this->get_user_cards($user_id);
+        if (!is_wp_error($existing_cards) && !empty($existing_cards['cards']) && count($existing_cards['cards']) >= 5) {
+            wc_add_notice(__('Bancard permite un máximo de 5 tarjetas por usuario.', 'woocommerce-bancard'), 'error');
+            return array(
+                'result'   => 'failure',
+                'redirect' => wc_get_endpoint_url('add-payment-method'),
+            );
+        }
+
+        $billing_phone = $this->get_customer_billing_phone($user_id);
+        $billing_email = $this->get_customer_billing_email($user_id);
+
+        if ($billing_phone === '' || $billing_email === '') {
+            wc_add_notice(__('Para registrar una tarjeta en Bancard necesitás completar teléfono y email de facturación en tu cuenta.', 'woocommerce-bancard'), 'error');
+            return array(
+                'result'   => 'failure',
+                'redirect' => wc_get_endpoint_url('edit-account'),
+            );
+        }
+
+        $card_id = $this->generate_card_id($user_id);
+        $operation = array(
+            'token'           => $this->get_api_client()->generate_hash($this->private_key, $card_id, $user_id, 'request_new_card'),
+            'card_id'         => $card_id,
+            'user_id'         => $user_id,
+            'user_cell_phone' => $billing_phone,
+            'user_mail'       => $billing_email,
+            'return_url'      => add_query_arg(
+                array(
+                    'payment_method' => $this->id,
+                ),
+                wc_get_endpoint_url('add-payment-method')
+            ),
+        );
+
+        $response = $this->get_api_client()->request_cards_new($operation);
+        if (is_wp_error($response) || empty($response['status']) || $response['status'] !== 'success' || empty($response['process_id'])) {
+            wc_add_notice($this->get_api_client()->parse_error_message($response, __('No se pudo iniciar el catastro de la tarjeta.', 'woocommerce-bancard')), 'error');
+            return array(
+                'result'   => 'failure',
+                'redirect' => wc_get_endpoint_url('add-payment-method'),
+            );
+        }
+
+        $this->save_card_id($user_id, $card_id);
+
+        return array(
+            'result'   => 'success',
+            'redirect' => add_query_arg(
+                array(
+                    'payment_method'      => $this->id,
+                    'bancard_action'      => 'register_card',
+                    'bancard_process_id'  => rawurlencode($response['process_id']),
+                ),
+                wc_get_endpoint_url('add-payment-method')
+            ),
+        );
     }
 
     public function process_payment($order_id) {
@@ -193,59 +270,6 @@ class WC_Gateway_Bancard_Tokens extends WC_Gateway_Bancard_Base {
         return array('result' => 'failure');
     }
 
-    public function add_payment_method() {
-        $user_id = get_current_user_id();
-        if (!$user_id) {
-            wc_print_notice(__('Debés iniciar sesión para registrar una tarjeta.', 'woocommerce-bancard'), 'error');
-            return;
-        }
-
-        if (!empty($_GET['status'])) {
-            $status = sanitize_text_field(wp_unslash($_GET['status']));
-            $description = !empty($_GET['description']) ? sanitize_text_field(wp_unslash($_GET['description'])) : '';
-
-            if ($status === 'add_new_card_success') {
-                wc_print_notice(__('Tarjeta registrada correctamente en Bancard.', 'woocommerce-bancard'), 'success');
-                return;
-            }
-
-            if ($status === 'add_new_card_fail') {
-                wc_print_notice($description ?: __('Bancard rechazó el catastro de la tarjeta.', 'woocommerce-bancard'), 'error');
-                return;
-            }
-        }
-
-        $cards_response = $this->get_user_cards($user_id);
-        if (!is_wp_error($cards_response) && !empty($cards_response['cards']) && count($cards_response['cards']) >= 5) {
-            wc_print_notice(__('Bancard permite un máximo de 5 tarjetas por usuario.', 'woocommerce-bancard'), 'error');
-            return;
-        }
-
-        $card_id = $this->generate_card_id($user_id);
-        $operation = array(
-            'token'           => $this->get_api_client()->generate_hash($this->private_key, $card_id, $user_id, 'request_new_card'),
-            'card_id'         => $card_id,
-            'user_id'         => $user_id,
-            'user_cell_phone' => get_user_meta($user_id, 'billing_phone', true),
-            'user_mail'       => get_user_meta($user_id, 'billing_email', true),
-            'return_url'      => wc_get_endpoint_url('add-payment-method'),
-        );
-
-        $response = $this->get_api_client()->request_cards_new($operation);
-        if (is_wp_error($response) || empty($response['status']) || $response['status'] !== 'success' || empty($response['process_id'])) {
-            wc_print_notice($this->get_api_client()->parse_error_message($response, __('No se pudo iniciar el catastro de la tarjeta.', 'woocommerce-bancard')), 'error');
-            return;
-        }
-
-        $this->save_card_id($user_id, $card_id);
-        $script = esc_url($this->get_api_client()->get_base_url() . '/checkout/javascript/dist/bancard-checkout-4.0.0.js');
-
-        echo '<script src="' . $script . '"></script>';
-        echo '<div id="bancard-token-form"><p>' . esc_html__('Cargando formulario de registro de tarjeta...', 'woocommerce-bancard') . '</p></div>';
-        echo '<style>form#add_payment_method{display:none!important;}</style>';
-        echo "<script>window.addEventListener('load',function(){Bancard.Cards.createForm('bancard-token-form','" . esc_js($response['process_id']) . "');});</script>";
-    }
-
     public function get_user_cards($user_id) {
         $user_id = absint($user_id);
         if (!$user_id) {
@@ -254,6 +278,7 @@ class WC_Gateway_Bancard_Tokens extends WC_Gateway_Bancard_Base {
 
         $operation = array(
             'token' => $this->get_api_client()->generate_hash($this->private_key, $user_id, 'request_user_cards'),
+            'extra_response_attributes' => array('cards.bancard_proccessed'),
         );
 
         return $this->get_api_client()->request_user_cards($user_id, $operation);
@@ -282,42 +307,43 @@ class WC_Gateway_Bancard_Tokens extends WC_Gateway_Bancard_Base {
         $cards = isset($response['cards']) && is_array($response['cards']) ? $response['cards'] : array();
         if (empty($cards)) {
             echo '<p>' . esc_html__('No tenés métodos de pago guardados.', 'woocommerce-bancard') . '</p>';
-            return;
-        }
+        } else {
+            echo '<table id="Bancard-cards-table" class="shop_table shop_table_responsive my_account_orders">';
+            echo '<thead><tr>';
+            echo '<th>' . esc_html__('Número de tarjeta', 'woocommerce-bancard') . '</th>';
+            echo '<th>' . esc_html__('Vencimiento', 'woocommerce-bancard') . '</th>';
+            echo '<th>' . esc_html__('Marca', 'woocommerce-bancard') . '</th>';
+            echo '<th>' . esc_html__('Tipo', 'woocommerce-bancard') . '</th>';
+            echo '<th>' . esc_html__('Acciones', 'woocommerce-bancard') . '</th>';
+            echo '</tr></thead><tbody>';
 
-        echo '<table id="Bancard-cards-table" class="shop_table shop_table_responsive my_account_orders">';
-        echo '<thead><tr>';
-        echo '<th>' . esc_html__('Número de tarjeta', 'woocommerce-bancard') . '</th>';
-        echo '<th>' . esc_html__('Vencimiento', 'woocommerce-bancard') . '</th>';
-        echo '<th>' . esc_html__('Marca', 'woocommerce-bancard') . '</th>';
-        echo '<th>' . esc_html__('Tipo', 'woocommerce-bancard') . '</th>';
-        echo '<th>' . esc_html__('Acciones', 'woocommerce-bancard') . '</th>';
-        echo '</tr></thead><tbody>';
+            foreach ($cards as $card) {
+                $this->sync_woocommerce_token($user_id, $card);
 
-        foreach ($cards as $card) {
-            $this->sync_woocommerce_token($user_id, $card);
-
-            $delete_url = wp_nonce_url(
-                add_query_arg(
-                    array(
-                        'bancard_action' => 'delete_card',
-                        'card_token'     => $card['alias_token'],
+                $delete_url = wp_nonce_url(
+                    add_query_arg(
+                        array(
+                            'bancard_action' => 'delete_card',
+                            'card_token'     => $card['alias_token'],
+                        ),
+                        wc_get_endpoint_url('payment-methods')
                     ),
-                    wc_get_endpoint_url('payment-methods')
-                ),
-                'bancard_delete_card'
-            );
+                    'bancard_delete_card'
+                );
 
-            echo '<tr>';
-            echo '<td>' . esc_html($card['card_masked_number']) . '</td>';
-            echo '<td>' . esc_html($card['expiration_date']) . '</td>';
-            echo '<td>' . esc_html($card['card_brand']) . '</td>';
-            echo '<td>' . esc_html(isset($card['card_type']) ? $card['card_type'] : '') . '</td>';
-            echo '<td><a href="' . esc_url($delete_url) . '" class="button" onclick="return confirm(\'' . esc_js(__('¿Eliminar esta tarjeta?', 'woocommerce-bancard')) . '\');">' . esc_html__('Eliminar', 'woocommerce-bancard') . '</a></td>';
-            echo '</tr>';
+                echo '<tr>';
+                echo '<td>' . esc_html($card['card_masked_number']) . '</td>';
+                echo '<td>' . esc_html($card['expiration_date']) . '</td>';
+                echo '<td>' . esc_html($card['card_brand']) . '</td>';
+                echo '<td>' . esc_html(isset($card['card_type']) ? $card['card_type'] : '') . '</td>';
+                echo '<td><a href="' . esc_url($delete_url) . '" class="button" onclick="return confirm(\'' . esc_js(__('¿Eliminar esta tarjeta?', 'woocommerce-bancard')) . '\');">' . esc_html__('Eliminar', 'woocommerce-bancard') . '</a></td>';
+                echo '</tr>';
+            }
+
+            echo '</tbody></table>';
         }
 
-        echo '</tbody></table>';
+        echo '<p><a class="button" href="' . esc_url(wc_get_endpoint_url('add-payment-method')) . '">' . esc_html__('Agregar nueva tarjeta', 'woocommerce-bancard') . '</a></p>';
     }
 
     public function delete_bancard_card($user_id, $card_token, $nonce = '') {
@@ -402,12 +428,10 @@ class WC_Gateway_Bancard_Tokens extends WC_Gateway_Bancard_Base {
     }
 
     protected function generate_card_id($user_id) {
-        $cards = get_user_meta($user_id, '_bancard_card_ids', true);
-        if (!is_array($cards)) {
-            $cards = array();
-        }
+        $sequence = absint(get_user_meta($user_id, '_bancard_card_sequence', true)) + 1;
+        $card_id = (string) $user_id . str_pad((string) $sequence, 2, '0', STR_PAD_LEFT);
 
-        return 'card_' . $user_id . '_' . (count($cards) + 1);
+        return substr($card_id, 0, 19);
     }
 
     protected function save_card_id($user_id, $card_id) {
@@ -420,6 +444,8 @@ class WC_Gateway_Bancard_Tokens extends WC_Gateway_Bancard_Base {
             $cards[] = $card_id;
             update_user_meta($user_id, '_bancard_card_ids', $cards);
         }
+
+        update_user_meta($user_id, '_bancard_card_sequence', absint(get_user_meta($user_id, '_bancard_card_sequence', true)) + 1);
     }
 
     protected function sync_woocommerce_token($user_id, array $card) {
@@ -445,5 +471,147 @@ class WC_Gateway_Bancard_Tokens extends WC_Gateway_Bancard_Base {
         $token->set_card_type($this->normalize_card_brand($card['card_brand']));
         $token->set_user_id($user_id);
         $token->save();
+    }
+
+    protected function render_add_payment_method_fields() {
+        $user_id = get_current_user_id();
+        if (!$user_id) {
+            wc_print_notice(__('Debés iniciar sesión para registrar una tarjeta.', 'woocommerce-bancard'), 'error');
+            return;
+        }
+
+        $status = isset($_GET['status']) ? sanitize_text_field(wp_unslash($_GET['status'])) : '';
+        $description = isset($_GET['description']) ? sanitize_text_field(wp_unslash($_GET['description'])) : '';
+        $process_id = isset($_GET['bancard_process_id']) ? sanitize_text_field(wp_unslash($_GET['bancard_process_id'])) : '';
+        $action = isset($_GET['bancard_action']) ? sanitize_text_field(wp_unslash($_GET['bancard_action'])) : '';
+
+        // JS helper: mueve #bancard-result-message fuera del form y oculta el form.
+        $move_out_js = "<script>
+(function () {
+    var form = document.getElementById('add_payment_method');
+    var msg  = document.getElementById('bancard-result-message');
+    if (form && msg) {
+        form.parentNode.insertBefore(msg, form.nextSibling);
+        form.style.display = 'none';
+    }
+})();
+</script>";
+
+        if ($status === 'add_new_card_success') {
+            $cards = $this->get_user_cards($user_id);
+            if (!is_wp_error($cards) && !empty($cards['cards'])) {
+                foreach ($cards['cards'] as $card) {
+                    $this->sync_woocommerce_token($user_id, $card);
+                }
+            }
+
+            echo '<div id="bancard-result-message">';
+            wc_print_notice(__('Tarjeta registrada correctamente en Bancard.', 'woocommerce-bancard'), 'success');
+            echo '<p><a class="button" href="' . esc_url(wc_get_endpoint_url('payment-methods')) . '">' . esc_html__('Volver a Mis tarjetas', 'woocommerce-bancard') . '</a></p>';
+            echo '</div>';
+            echo $move_out_js;
+            return;
+        }
+
+        if ($status === 'add_new_card_fail') {
+            $error_msg = $description ?: __('Bancard rechazó el catastro de la tarjeta.', 'woocommerce-bancard');
+
+            echo '<div id="bancard-result-message">';
+            wc_print_notice($error_msg, 'error');
+            echo '<p><a class="button" href="' . esc_url(wc_get_endpoint_url('add-payment-method')) . '">' . esc_html__('Intentar de nuevo', 'woocommerce-bancard') . '</a></p>';
+            echo '</div>';
+            echo $move_out_js;
+            return;
+        }
+
+        if ($action === 'register_card' && $process_id !== '') {
+            wc_clear_notices();
+            $bancard_script_url = esc_url($this->get_api_client()->get_base_url() . '/checkout/javascript/dist/bancard-checkout-4.0.0.js');
+            $process_id_safe    = esc_js($process_id);
+
+            echo '<div id="bancard-token-form"><p>' . esc_html__('Cargando formulario de registro de tarjeta...', 'woocommerce-bancard') . '</p></div>';
+
+            // Creamos el script de Bancard dinámicamente y usamos onload para
+            // garantizar que Bancard esté disponible ANTES de llamar createForm
+            // (evita el race condition con scripts inline que se ejecutan antes
+            // de que el script externo termine de parsear).
+            echo "<script>
+(function () {
+    function initBancardForm() {
+        // Suprimir el notice prematuro de WooCommerce.
+        document.querySelectorAll(
+            '.woocommerce-message, .wc-block-components-notice-banner--success'
+        ).forEach(function (el) { el.style.display = 'none'; });
+
+        // Mover el contenedor FUERA del form antes de ocultarlo para que
+        // el iframe de Bancard no quede arrastrado por el display:none del form.
+        var form      = document.getElementById('add_payment_method');
+        var container = document.getElementById('bancard-token-form');
+        if (form && container) {
+            form.parentNode.insertBefore(container, form.nextSibling);
+            form.style.display = 'none';
+        }
+
+        Bancard.Cards.createForm('bancard-token-form', '$process_id_safe');
+    }
+
+    var s    = document.createElement('script');
+    s.src    = '$bancard_script_url';
+    s.async  = false;
+    s.onload = initBancardForm;
+    document.head.appendChild(s);
+})();
+</script>";
+            return;
+        }
+
+        $billing_phone = $this->get_customer_billing_phone($user_id);
+        $billing_email = $this->get_customer_billing_email($user_id);
+
+        if ($billing_phone === '' || $billing_email === '') {
+            wc_print_notice(__('Antes de registrar una tarjeta, completá tu teléfono y email de facturación en tu cuenta.', 'woocommerce-bancard'), 'notice');
+            echo '<p><a class="button" href="' . esc_url(wc_get_endpoint_url('edit-account')) . '">' . esc_html__('Completar datos de cuenta', 'woocommerce-bancard') . '</a></p>';
+            return;
+        }
+
+        $cards_response = $this->get_user_cards($user_id);
+        if (!is_wp_error($cards_response) && !empty($cards_response['cards']) && count($cards_response['cards']) >= 5) {
+            wc_print_notice(__('Bancard permite un máximo de 5 tarjetas por usuario.', 'woocommerce-bancard'), 'error');
+            return;
+        }
+
+        echo '<p>' . esc_html__('Al continuar se abrirá el formulario seguro de Bancard para registrar una nueva tarjeta en tu cuenta.', 'woocommerce-bancard') . '</p>';
+    }
+
+    protected function validate_add_payment_method_request() {
+        $user_id = get_current_user_id();
+        if (!$user_id) {
+            wc_add_notice(__('Debés iniciar sesión para registrar una tarjeta.', 'woocommerce-bancard'), 'error');
+            return false;
+        }
+
+        if ($this->get_customer_billing_phone($user_id) === '' || $this->get_customer_billing_email($user_id) === '') {
+            wc_add_notice(__('Para registrar una tarjeta en Bancard necesitás teléfono y email de facturación.', 'woocommerce-bancard'), 'error');
+            return false;
+        }
+
+        return true;
+    }
+
+    protected function get_customer_billing_phone($user_id) {
+        $phone = get_user_meta($user_id, 'billing_phone', true);
+        return is_string($phone) ? trim($phone) : '';
+    }
+
+    protected function get_customer_billing_email($user_id) {
+        $email = get_user_meta($user_id, 'billing_email', true);
+        if ($email === '') {
+            $user = get_userdata($user_id);
+            if ($user && !empty($user->user_email)) {
+                $email = $user->user_email;
+            }
+        }
+
+        return is_email($email) ? $email : '';
     }
 }
