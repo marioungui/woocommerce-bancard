@@ -455,6 +455,18 @@ class WC_Gateway_Bancard_Tokens extends WC_Gateway_Bancard_Base {
         }
 
         $operation_response = isset($response['operation']) && is_array($response['operation']) ? $response['operation'] : array();
+        if (!empty($operation_response['process_id'])) {
+            $order->update_meta_data('_bancard_requires_customer_3ds', 'yes');
+            $order->update_meta_data('_bancard_3ds_process_id', $operation_response['process_id']);
+            $order->save();
+
+            $this->mark_subscription_payment_failed(
+                $order,
+                __('Bancard requiere autenticacion Secure3D para esta renovacion. El cliente debe pagar manualmente o cambiar el metodo de pago.', 'woocommerce-bancard')
+            );
+            return false;
+        }
+
         if ($this->is_successful_confirmation($operation_response)) {
             $note = __('Cobro recurrente procesado correctamente por Bancard.', 'woocommerce-bancard');
             $card_type_label = $this->get_human_payment_card_type($operation_response);

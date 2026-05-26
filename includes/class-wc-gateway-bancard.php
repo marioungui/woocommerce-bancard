@@ -105,6 +105,8 @@ class WC_Gateway_Bancard extends WC_Gateway_Bancard_Base {
         $payload = json_decode(file_get_contents('php://input'), true);
         $operation = isset($payload['operation']) && is_array($payload['operation']) ? $payload['operation'] : array();
 
+        $this->get_api_client()->log('debug', 'Callback received from Bancard', array('payload' => $payload));
+
         if (empty($operation['shop_process_id'])) {
             status_header(200);
             wp_send_json(array('status' => 'ignored'));
@@ -114,6 +116,20 @@ class WC_Gateway_Bancard extends WC_Gateway_Bancard_Base {
         if (!$order) {
             status_header(200);
             wp_send_json(array('status' => 'order_not_found'));
+        }
+
+        if ($this->is_duplicate_confirmation($order, $operation)) {
+            $this->get_api_client()->log(
+                'debug',
+                'Duplicate Bancard callback ignored',
+                array(
+                    'order_id' => $order->get_id(),
+                    'ticket'   => isset($operation['ticket_number']) ? $operation['ticket_number'] : '',
+                )
+            );
+
+            status_header(200);
+            wp_send_json(array('status' => 'already_processed'));
         }
 
         $this->persist_confirmation_meta($order, $operation);
@@ -136,6 +152,8 @@ class WC_Gateway_Bancard extends WC_Gateway_Bancard_Base {
         } else {
             $order->update_status('failed', $this->get_confirmation_error($operation));
         }
+
+        $this->store_confirmation_fingerprint($order, $operation);
 
         status_header(200);
         wp_send_json(array('status' => 'success'));

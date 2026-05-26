@@ -11,11 +11,14 @@ class WC_Bancard_API {
     protected $public_key;
     protected $private_key;
     protected $environment;
+    protected $debug;
+    protected $logger;
 
-    public function __construct($public_key, $private_key, $environment = 'staging') {
+    public function __construct($public_key, $private_key, $environment = 'staging', $debug = false) {
         $this->public_key = (string) $public_key;
         $this->private_key = (string) $private_key;
         $this->environment = $environment === 'production' ? 'production' : 'staging';
+        $this->debug = (bool) $debug;
     }
 
     public function get_base_url() {
@@ -54,6 +57,16 @@ class WC_Bancard_API {
             return new WP_Error('bancard_missing_credentials', __('Configurá la llave pública y privada de Bancard antes de operar.', 'woocommerce-bancard'));
         }
 
+        $this->log(
+            'debug',
+            'Request to Bancard',
+            array(
+                'path'    => $path,
+                'method'  => strtoupper($method),
+                'payload' => $this->sanitize_log_data($payload),
+            )
+        );
+
         $response = wp_remote_request(
             $this->get_base_url() . $path,
             array(
@@ -68,11 +81,22 @@ class WC_Bancard_API {
         );
 
         if (is_wp_error($response)) {
+            $this->log('error', 'Bancard request failed', array('error' => $response->get_error_message()));
             return $response;
         }
 
         $status_code = (int) wp_remote_retrieve_response_code($response);
         $body = json_decode(wp_remote_retrieve_body($response), true);
+
+        $this->log(
+            $status_code >= 400 ? 'error' : 'debug',
+            'Response from Bancard',
+            array(
+                'path'        => $path,
+                'status_code' => $status_code,
+                'body'        => $this->sanitize_log_data(is_array($body) ? $body : wp_remote_retrieve_body($response)),
+            )
+        );
 
         if (!is_array($body)) {
             return new WP_Error('bancard_invalid_json', __('Bancard devolvió una respuesta inválida.', 'woocommerce-bancard'));
@@ -110,6 +134,48 @@ class WC_Bancard_API {
         }
 
         return $fallback ?: __('Ocurrió un error al comunicarse con Bancard.', 'woocommerce-bancard');
+    }
+
+    public function log($level, $message, array $context = array()) {
+        if (!$this->debug || !function_exists('wc_get_logger')) {
+            return;
+        }
+
+        if (!$this->logger) {
+            $this->logger = wc_get_logger();
+        }
+
+        $context = $this->sanitize_log_data($context);
+        $context['source'] = 'woocommerce-bancard';
+        $this->logger->log($level, $message . ' ' . wp_json_encode($context), $context);
+    }
+
+    protected function sanitize_log_data($data) {
+        if (is_array($data)) {
+            $sanitized = array();
+            foreach ($data as $key => $value) {
+                $normalized_key = strtolower((string) $key);
+                if (in_array($normalized_key, array('token', 'public_key', 'private_key', 'alias_token'), true)) {
+                    $sanitized[$key] = $this->mask_value($value);
+                    continue;
+                }
+
+                $sanitized[$key] = $this->sanitize_log_data($value);
+            }
+
+            return $sanitized;
+        }
+
+        return $data;
+    }
+
+    protected function mask_value($value) {
+        $value = (string) $value;
+        if ($value === '') {
+            return '';
+        }
+
+        return strlen($value) <= 8 ? '***' : substr($value, 0, 4) . '***' . substr($value, -4);
     }
 
     public function request_single_buy(array $operation) {

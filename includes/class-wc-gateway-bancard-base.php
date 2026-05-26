@@ -16,6 +16,7 @@ abstract class WC_Gateway_Bancard_Base extends WC_Payment_Gateway {
     public $commerce_stamp;
     public $commerce_expedition_point;
     public $commerce_establishment;
+    public $debug_mode;
     protected $api_client;
 
     protected function boot_gateway(array $args) {
@@ -43,6 +44,7 @@ abstract class WC_Gateway_Bancard_Base extends WC_Payment_Gateway {
         $this->commerce_stamp = $this->get_option('commerce_stamp', '');
         $this->commerce_expedition_point = $this->get_option('commerce_expedition_point', '');
         $this->commerce_establishment = $this->get_option('commerce_establishment', '');
+        $this->debug_mode = $this->get_option('debug_mode', 'no');
 
         add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'process_admin_options'));
     }
@@ -135,6 +137,13 @@ abstract class WC_Gateway_Bancard_Base extends WC_Payment_Gateway {
                 'title' => __('Establecimiento', 'woocommerce-bancard'),
                 'type'  => 'text',
             ),
+            'debug_mode' => array(
+                'title'       => __('Logs de depuracion', 'woocommerce-bancard'),
+                'type'        => 'checkbox',
+                'label'       => __('Guardar requests y responses sanitizados en WooCommerce > Estado > Registros', 'woocommerce-bancard'),
+                'default'     => 'no',
+                'description' => __('No se guardan llaves privadas ni alias tokens completos.', 'woocommerce-bancard'),
+            ),
         );
 
         return array_replace($fields, $overrides);
@@ -142,7 +151,7 @@ abstract class WC_Gateway_Bancard_Base extends WC_Payment_Gateway {
 
     public function get_api_client() {
         if (!$this->api_client instanceof WC_Bancard_API) {
-            $this->api_client = new WC_Bancard_API($this->public_key, $this->private_key, $this->environment);
+            $this->api_client = new WC_Bancard_API($this->public_key, $this->private_key, $this->environment, $this->debug_mode === 'yes');
         }
 
         return $this->api_client;
@@ -367,6 +376,32 @@ abstract class WC_Gateway_Bancard_Base extends WC_Payment_Gateway {
             }
         }
 
+        $order->save();
+    }
+
+    protected function get_confirmation_fingerprint(array $confirmation) {
+        $parts = array(
+            isset($confirmation['shop_process_id']) ? $confirmation['shop_process_id'] : '',
+            isset($confirmation['ticket_number']) ? $confirmation['ticket_number'] : '',
+            isset($confirmation['authorization_number']) ? $confirmation['authorization_number'] : '',
+            isset($confirmation['response_code']) ? $confirmation['response_code'] : '',
+            isset($confirmation['token']) ? $confirmation['token'] : '',
+        );
+
+        return md5(implode('|', array_map('strval', $parts)));
+    }
+
+    protected function is_duplicate_confirmation(WC_Order $order, array $confirmation) {
+        $fingerprint = $this->get_confirmation_fingerprint($confirmation);
+        if ($fingerprint === '') {
+            return false;
+        }
+
+        return hash_equals((string) $order->get_meta('_bancard_confirmation_fingerprint', true), $fingerprint);
+    }
+
+    protected function store_confirmation_fingerprint(WC_Order $order, array $confirmation) {
+        $order->update_meta_data('_bancard_confirmation_fingerprint', $this->get_confirmation_fingerprint($confirmation));
         $order->save();
     }
 

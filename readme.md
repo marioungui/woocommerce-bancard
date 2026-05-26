@@ -1,88 +1,102 @@
 # Gateway de Bancard para WooCommerce
+
+[![Version](https://img.shields.io/badge/version-0.3.3-blue.svg)](https://github.com/marioungui/woocommerce-bancard/releases)
+[![WooCommerce](https://img.shields.io/badge/WooCommerce-compatible-96588a.svg)](https://woocommerce.com/)
+[![PHP](https://img.shields.io/badge/PHP-%3E%3D7.2-777bb4.svg)](https://www.php.net/)
+[![License: GPL v2+](https://img.shields.io/badge/license-GPLv2%2B-green.svg)](https://www.gnu.org/licenses/gpl-2.0.html)
 [![CodeFactor](https://www.codefactor.io/repository/github/marioungui/woocommerce-bancard/badge/main)](https://www.codefactor.io/repository/github/marioungui/woocommerce-bancard/overview/main)
 
-Este es un plugin para WooCommerce que integra la pasarela de pagos Bancard para permitir a los usuarios realizar pagos con tarjeta de crédito y débito a través de la plataforma Bancard.
+Plugin para integrar Bancard con WooCommerce usando la API eCommerce v0.3.
 
-## Funcionalidades
+## Version 0.3.3
 
-### 1. Procesamiento de Pagos
+Esta version consolida el flujo moderno del plugin:
 
-- **Single Buy**: El plugin permite a los usuarios realizar compras únicas redirigiendo a la página de pago de Bancard.
-- **Pagos Recurrentes**: Soporte para pagos de suscripciones mediante el uso de tokens.
-- **Gestión de Tokens**: Las tarjetas de los usuarios se pueden registrar y almacenar de manera segura como tokens en WooCommerce, permitiendo pagos rápidos en futuras transacciones.
-  
-### 2. Gestión de Tarjetas Guardadas
-
-- **Listado de Tarjetas**: Los usuarios pueden ver una lista de sus tarjetas guardadas en la sección "Mi cuenta".
-- **Eliminación de Tarjetas**: Los usuarios pueden eliminar tarjetas guardadas con la confirmación previa de la acción.
-- **Tokenización**: Implementación del proceso de tokenización de tarjetas para realizar pagos de manera segura.
-
-### 3. Interacción con la API de Bancard
-
-- **Registro de Tarjetas**: El plugin permite a los usuarios registrar nuevas tarjetas utilizando la API de Bancard.
-- **Consulta de Tarjetas Catastradas**: Consulta de tarjetas guardadas para un usuario mediante la API de Bancard.
-
-### 4. Integración con WooCommerce
-
-- **Compatibilidad Total**: El plugin se integra completamente con el sistema de tokens de WooCommerce, permitiendo que las tarjetas guardadas se gestionen de la misma manera que con otros métodos de pago.
-
-## Estructura del Código
-
-El plugin está estructurado en las siguientes clases y archivos:
-
-### 1. `class-wc-gateway-bancard.php`
-Esta es la clase principal del plugin que maneja la mayoría de las funcionalidades relacionadas con la pasarela de pagos Bancard. Algunas de sus funciones clave incluyen:
-
-- **`process_payment`**: Maneja el proceso de pago para compras únicas.
-- **`process_subscription_payment`**: Maneja los pagos recurrentes para suscripciones.
-- **`check_response`**: Procesa las notificaciones y confirmaciones de la API de Bancard.
-- **`process_refund`**: Gestiona los reembolsos a través de la API de Bancard.
-- **`bancard_payment_template`**: Carga el template de la página de pago de Bancard desde el plugin.
-- **`is_available`**: Verifica si la pasarela de pagos está disponible.
-
-### 2. `class-wc-gateway-bancard-tokens.php`
-Esta clase extiende las funcionalidades de `WC_Gateway_Bancard` para manejar la tokenización y gestión de tarjetas guardadas. Algunas de sus funciones clave incluyen:
-
-- **`add_payment_method`**: Registra una nueva tarjeta para un usuario y la almacena como un token.
-- **`list_payment_methods`**: Consulta y lista las tarjetas guardadas de un usuario.
-- **`generate_card_id`**: Genera un ID único para cada tarjeta registrada.
-- **`save_card_id`**: Almacena los `card_id` generados en el `usermeta` del usuario.
-
-### 3. Plantillas
-- **`bancard-payment-page.php`**: Plantilla para la página de pago de Bancard.
-- **`bancard-card-tokenization.php`**: Plantilla para la página de tokenización de tarjetas.
-
-### 4. Manejo de URLs Personalizadas
-- **Eliminación de Tarjetas**: Implementación de una URL personalizada para manejar la eliminación de tarjetas, con confirmación previa.
-
-## En Progreso
-
-### 1. **Mejora en la Gestión de Tokens**
-- **Integración Completa con el Sistema de Tokens de WooCommerce**: Asegurar que todas las tarjetas catastradas se gestionen mediante el sistema de tokens nativo de WooCommerce.
-
-### 2. **Manejo de Resultados de Tokenización**
-- **Manejo Detallado de Resultados en `bancard-tokenization-result`**: Implementar un manejo más robusto de los resultados de tokenización para confirmar el éxito o fallo del registro de tarjetas.
-
-### 3. **Documentación Adicional**
-- **Instrucciones de Instalación y Configuración**: Proporcionar una guía detallada para la instalación y configuración del plugin en entornos de producción y pruebas.
+- Compra simple embebida con Bancard Checkout.
+- Pagos con tarjetas guardadas mediante alias token.
+- Registro y eliminacion de tarjetas desde Mi cuenta.
+- Secure3D para pagos con token cuando Bancard devuelve `confirmation.process_id`.
+- Zimple.
+- Preautorizaciones y confirmacion manual desde el pedido.
+- Factura electronica via bloque `billing`.
+- Cobros recurrentes con WooCommerce Subscriptions usando tarjetas tokenizadas.
+- Deteccion explicita de renovaciones que requieren 3DS para que se cobren manualmente.
+- Metabox administrativo con datos Bancard del pedido.
+- Logs sanitizados opcionales con `WC_Logger`.
+- Idempotencia del callback para evitar notas o cambios duplicados si Bancard reintenta la notificacion.
 
 ## Requisitos
 
-- WooCommerce 4.0 o superior
-- PHP 7.2 o superior
+- WordPress con WooCommerce activo.
+- PHP 7.2 o superior.
+- Credenciales de comercio Bancard.
+- WooCommerce Subscriptions solo si se van a usar pagos recurrentes.
 
-## Instalación
+## Configuracion
 
-1. Clona este repositorio en tu directorio de plugins de WordPress:  
-   `git clone https://github.com/tu-usuario/woocommerce-bancard.git`
-2. Activa el plugin desde el panel de administración de WordPress.
-3. Configura el plugin desde **WooCommerce > Ajustes > Pagos > Bancard**.
-4. Confirmá la URL de la dirección de pagos en el portal de comercios con `https://{tu-dominio}/wc-api/wc_gateway_bancard`
+1. Instalar el plugin en `wp-content/plugins/woocommerce-bancard`.
+2. Activarlo desde el panel de WordPress.
+3. Ir a WooCommerce > Ajustes > Pagos.
+4. Configurar los gateways Bancard que correspondan.
+5. Cargar llave publica, llave privada y ambiente.
+6. Confirmar en el portal de comercios que la URL de confirmacion sea:
 
-## Contribuir
+```text
+https://{tu-dominio}/wc-api/wc_gateway_bancard
+```
 
-Las contribuciones son bienvenidas. Si encuentras un error o tienes una sugerencia de mejora, por favor abre un [issue](https://github.com/marioungui/woocommerce-bancard/issues) o envía un pull request.
+El plugin crea la pagina `bancard-payment` durante la activacion. Si no existe, el panel administrativo muestra una advertencia.
+
+## Pagos Con Token
+
+Las tarjetas se registran desde Mi cuenta > Mis tarjetas > Agregar nueva tarjeta. Bancard devuelve el formulario seguro y el plugin sincroniza las tarjetas catastradas con los tokens nativos de WooCommerce.
+
+Para pagos con token, el cliente selecciona una tarjeta guardada en checkout. Si Bancard exige Secure3D, el plugin redirige a la pagina embebida correspondiente y espera la confirmacion final por callback.
+
+## Recurrentes
+
+El gateway `Bancard Tokens` soporta renovaciones automaticas de WooCommerce Subscriptions usando el `alias_token` guardado.
+
+El plugin persiste el token en la orden inicial, la suscripcion y las ordenes de renovacion. Tambien soporta cambio de metodo de pago desde cliente/admin y sincroniza el token cuando una renovacion fallida se paga manualmente.
+
+Si una renovacion automatica requiere Secure3D, el plugin marca la renovacion como fallida con una nota clara, porque no hay cliente presente para completar la autenticacion.
+
+## Administracion
+
+En pedidos pagados con Bancard se muestra un metabox con:
+
+- Process ID.
+- Modo de proceso.
+- Numero de autorizacion.
+- Ticket.
+- Codigo de respuesta.
+- Tipo de tarjeta.
+- Cuotas.
+- Riesgo.
+- Pais de tarjeta.
+- IP del cliente.
+- Estado 3DS requerido.
+
+Tambien se pueden usar las acciones del pedido para consultar confirmacion, confirmar preautorizacion o cancelar factura electronica cuando aplique.
+
+## Logs
+
+Cada gateway incluye la opcion "Logs de depuracion". Cuando esta activa, el plugin registra requests y responses sanitizados en WooCommerce > Estado > Registros usando la fuente `woocommerce-bancard`.
+
+No se guardan llaves privadas, tokens completos ni alias tokens completos.
+
+## Desarrollo
+
+Los archivos principales son:
+
+- `includes/class-wc-gateway-bancard.php`: compra simple, callback, refunds y operaciones administrativas.
+- `includes/class-wc-gateway-bancard-tokens.php`: tarjetas guardadas, pagos con token, 3DS y recurrentes.
+- `includes/class-wc-gateway-bancard-zimple.php`: pagos Zimple.
+- `includes/class-wc-gateway-bancard-api.php`: cliente API Bancard.
+- `includes/class-wc-gateway-bancard-base.php`: helpers compartidos.
+- `includes/class-wc-gateway-bancard-hooks.php`: hooks WooCommerce, acciones admin y metabox.
+- `templates/bancard-payment-page.php`: pagina embebida de Checkout, Zimple y Charge3DS.
 
 ## Licencia
 
-Este proyecto está licenciado bajo la [Licencia MIT](https://opensource.org/licenses/MIT).
+GPLv2 or later.
